@@ -202,7 +202,7 @@ function onLoaded(obj, started) {
 
   $('st-mesh').textContent = meshes;
   $('st-tris').textContent = state.tris.toLocaleString('en-US');
-  $('st-load').textContent = ms + ' ms';
+  $('st-load').textContent = ms >= 1000 ? (ms / 1000).toFixed(1) + ' s' : ms + ' ms';
   $('st-load').classList.add('ok');
 
   state.ready = true;
