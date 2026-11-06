@@ -1,31 +1,115 @@
 <!DOCTYPE html>
-<html >
+<html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <title>Domla</title>
-  <link rel="stylesheet" href="css/cube.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>MARK LXXXV · Web 3D 全息战甲展示系统</title>
+<meta name="description" content="Web 3D Holographic Armor Display System - 实时渲染的全息战甲展示">
+<link rel="stylesheet" href="./css/hud.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%237de8ff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23d9faff'/%3E%3C/svg%3E">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./lib/three/three.module.js",
+    "three/addons/": "./lib/three/addons/"
+  }
+}
+</script>
 </head>
-
 <body>
-  <div class="scene">
-  <div class="cube">
-    <div class="cube__face cube__face--left"></div>
-    <div class="cube__face cube__face--right"></div>
-    <div class="cube__face cube__face--top"></div>
-    <div class="cube__face cube__face--bottom"></div>
-    <div class="cube__face cube__face--front"></div>
-    <div class="cube__face cube__face--back"></div>
+  <canvas id="stage"></canvas>
 
-    <div class="cube2">
-      <div class="cube2__face cube2__face--left"></div>
-      <div class="cube2__face cube2__face--right"></div>
-      <div class="cube2__face cube2__face--top"></div>
-      <div class="cube2__face cube2__face--bottom"></div>
-      <div class="cube2__face cube2__face--front"></div>
-      <div class="cube2__face cube2__face--back"></div>
-    </div>
+  <!-- 全屏特效层（CSS 实现，不参与 3D） -->
+  <div class="fx-scanlines" aria-hidden="true"></div>
+  <div class="fx-vignette" aria-hidden="true"></div>
+  <div class="fx-corner tl" aria-hidden="true"></div>
+  <div class="fx-corner tr" aria-hidden="true"></div>
+  <div class="fx-corner bl" aria-hidden="true"></div>
+  <div class="fx-corner br" aria-hidden="true"></div>
 
+  <!-- HUD 指示线画布 -->
+  <svg id="leader-lines" aria-hidden="true"></svg>
+
+  <!-- HUD 界面 -->
+  <div id="hud" class="hud hidden">
+
+    <header class="hud-top">
+      <section class="panel panel-system">
+        <h2 class="panel-title">ARMOR SYSTEM <span class="cn">装甲系统</span></h2>
+        <div class="sys-grid">
+          <span class="k">UNIT</span><span class="v" id="sys-unit">MARK LXXXV</span>
+          <span class="k">STATE</span><span class="v ok" id="sys-state">STANDBY</span>
+          <span class="k">RENDER</span><span class="v" id="sys-render">WEBGL2</span>
+          <span class="k">FPS</span><span class="v" id="sys-fps">--</span>
+          <span class="k">TRIS</span><span class="v" id="sys-tris">--</span>
+        </div>
+      </section>
+
+      <section class="panel panel-power">
+        <h2 class="panel-title">POWER <span class="cn">能量核心</span></h2>
+        <div class="power-row">
+          <div class="reactor-ring" id="reactor-ring"><i></i></div>
+          <div class="power-data">
+            <span class="k">OUTPUT</span>
+            <span class="v big" id="power-output">3.42 GJ/s</span>
+            <div class="bar"><i id="power-bar"></i></div>
+            <span class="k">INTEGRITY</span>
+            <span class="v" id="power-integrity">100.0%</span>
+          </div>
+        </div>
+      </section>
+    </header>
+
+    <aside class="hud-left">
+      <section class="panel panel-modules">
+        <h2 class="panel-title">MODULES <span class="cn">装甲模块</span></h2>
+        <ul id="module-list" class="module-list"></ul>
+      </section>
+    </aside>
+
+    <aside class="hud-right">
+      <section class="panel panel-info">
+        <h2 class="panel-title" id="info-title">TARGET INFO <span class="cn">部件信息</span></h2>
+        <div id="info-body" class="info-body">
+          <p class="info-hint">点击任意装甲模块<br>查看详细技术参数</p>
+        </div>
+      </section>
+    </aside>
+
+    <footer class="hud-bottom">
+      <div class="panel panel-controls">
+        <button class="btn primary" id="btn-explode">拆解 EXPLODE</button>
+        <button class="btn" id="btn-assemble">组装 ASSEMBLE</button>
+        <span class="sep"></span>
+        <button class="btn toggle on" id="btn-holo">全息 HOLO</button>
+        <button class="btn toggle on" id="btn-wire">线框 WIRE</button>
+        <span class="sep"></span>
+        <label class="slider"><span>扫描</span><input type="range" id="rng-scan" min="0" max="100" value="35"></label>
+        <label class="slider"><span>透明</span><input type="range" id="rng-opacity" min="10" max="100" value="55"></label>
+        <label class="slider"><span>自转</span><input type="range" id="rng-spin" min="0" max="100" value="30"></label>
+        <span class="sep"></span>
+        <button class="btn" id="btn-pause">暂停 PAUSE</button>
+        <button class="btn" id="btn-reset">复位视角 RESET</button>
+      </div>
+    </footer>
   </div>
-</div>
+
+  <!-- 启动画面 -->
+  <div id="boot" class="boot">
+    <div class="boot-inner">
+      <div class="boot-title">STARK INDUSTRIES</div>
+      <div class="boot-sub">WEB HOLOGRAPHIC ARMOR SYSTEM · MK LXXXV</div>
+      <div class="boot-bar"><i id="boot-bar"></i></div>
+      <div class="boot-log" id="boot-log">INITIALIZING…</div>
+    </div>
+  </div>
+  <div id="webgl-error" class="boot hidden">
+    <div class="boot-inner">
+      <div class="boot-title">RENDERER OFFLINE</div>
+      <div class="boot-sub">当前浏览器不支持 WebGL2，无法启动全息投影系统</div>
+    </div>
+  </div>
+
+  <script type="module" src="./js/main.js"></script>
 </body>
 </html>
