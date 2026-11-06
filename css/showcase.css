@@ -93,7 +93,7 @@ body {
   letter-spacing: .12em; color: rgba(255, 255, 255, .32);
 }
 .back {
-  position: fixed; top: clamp(22px, 4vh, 44px); left: 50%; transform: translateX(-50%);
+  position: fixed; right: clamp(20px, 3.4vw, 52px); bottom: clamp(20px, 3.4vh, 36px);
   z-index: 5; font-family: var(--mono); font-size: 10.5px; letter-spacing: .18em;
   color: rgba(255, 255, 255, .42); text-decoration: none; padding: 6px 10px;
   border: 1px solid transparent; border-radius: 999px; transition: .2s;
@@ -151,6 +151,7 @@ body {
   .sub { font-size: 11px; }
   .toolbar { gap: 3px; padding: 5px; }
   .toolbar button { font-size: 11px; padding: 8px 11px; }
+  #btn-full { display: none; }
 }
 @media (max-height: 520px) {
   .masthead { display: none; }

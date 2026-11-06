@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { TweenEngine } from '../animation/TweenEngine.js';
 
 const CONFIG = {
   url: '../../assets/models/mk85.fbx',
@@ -32,7 +33,11 @@ const state = {
   tris: 0,
   meshes: 0,
   fit: { dist: 3.2, targetY: 1 },
+  parts: [],            // 拆解锚点
+  exploded: false,
 };
+
+const tweens = new TweenEngine();
 
 let renderer, scene, camera, controls, sun, pmrem, model;
 
@@ -107,9 +112,9 @@ function initLights() {
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.near = 0.5;
   sun.shadow.camera.far = 12;
-  sun.shadow.camera.left = -2.4;
-  sun.shadow.camera.right = 2.4;
-  sun.shadow.camera.top = 3.4;
+  sun.shadow.camera.left = -3.4;
+  sun.shadow.camera.right = 3.4;
+  sun.shadow.camera.top = 4.4;
   sun.shadow.camera.bottom = -0.4;
   sun.shadow.bias = -0.0006;
   sun.shadow.normalBias = 0.02;
@@ -195,6 +200,7 @@ function onLoaded(obj, started) {
   model = obj;
   scene.add(model);
   dress();
+  buildPivots();
 
   const height = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3()).y;
   frameCamera(height);
@@ -209,7 +215,7 @@ function onLoaded(obj, started) {
   setProgress(1, (CONFIG.fileBytes / 1048576).toFixed(1));
   setTimeout(() => $('loader').classList.add('done'), 260);
 
-  window.__MK85 = { THREE, scene, camera, renderer, controls, state, model, resetView, setMode, capture };
+  window.__MK85 = { THREE, scene, camera, renderer, controls, state, model, resetView, setMode, capture, explode, assemble, applyExplode };
 }
 
 function normalize(obj) {
@@ -316,6 +322,136 @@ function setMode(mode) {
 }
 
 /* ------------------------------------------------------------------ */
+/* 拆解 / 组装                                                          */
+/* ------------------------------------------------------------------ */
+/** 拆解方向（按部件语义，而非简单径向）：
+ *  内衬不动作为底座，胸/腰/髋向前脱离，四肢向外，头部向上。
+ *  x 分量会按左右翻转，所以这里只写大小。 */
+const PART_DIR = {
+  head: [0, 1, 0.12],
+  neck: [0, 0.8, 0.1],
+  chest: [0, 0.22, 1],
+  weist: [0, 0.05, 0.95],
+  hip: [0, -0.12, 0.85],
+  inner_armor: [0, 0, 0],
+  shouder: [1, 0.3, 0.18],
+  upper_arm: [1, 0.12, 0.12],
+  elbow: [0.95, 0.05, 0.12],
+  lower_arm: [0.95, 0.02, 0.1],
+  wrist: [0.95, 0, 0.1],
+  hand: [0.95, -0.02, 0.16],
+  hip_leg: [0.8, 0, 0.25],
+  upper_leg: [0.85, -0.05, 0.18],
+  knee: [0.9, -0.02, 0.15],
+  lower_leg: [0.9, -0.06, 0.12],
+  foot: [0.85, -0.14, 0.22],
+};
+
+/** 每个部件建一个锚点 pivot（attach 保持世界变换不变，视觉零位移），
+ *  之后拆解动画只改 pivot.position，部件整体跟随，数学上不会累积误差。 */
+function buildPivots() {
+  if (state.parts.length) return;
+  model.updateMatrixWorld(true);
+  const meshes = [];
+  model.traverse((o) => { if (o.isMesh) meshes.push(o); });
+
+  const bodyCenter = new THREE.Vector3(0, CONFIG.targetHeight * 0.5, 0);
+  const bodyLocal = model.worldToLocal(bodyCenter.clone());
+  // 部件位置在「模型局部空间」，单位是 FBX 原始单位（可能是厘米级），
+  // 而位移量想按米来算 → 必须除以根节点的世界缩放。
+  const unit = model.getWorldScale(new THREE.Vector3()).x || 1;
+  const floorLocal = model.worldToLocal(new THREE.Vector3(0, 0.04, 0)).y;
+  state.floorY = floorLocal;
+
+  meshes.forEach((m, i) => {
+    const box = new THREE.Box3().setFromObject(m);
+    const anchor = model.worldToLocal(box.getCenter(new THREE.Vector3()));
+    const base = baseName(m.name);
+
+    const preset = PART_DIR[base];
+    const dir = new THREE.Vector3();
+    if (preset) {
+      const side = anchor.x < 0 ? -1 : 1;
+      dir.set(preset[0] * side, preset[1], preset[2]).normalize();
+    } else {
+      dir.copy(anchor).sub(bodyLocal);
+      if (dir.lengthSq() < 1e-8) dir.set(0, 1, 0);
+      dir.normalize();
+    }
+
+    const pivot = new THREE.Group();
+    pivot.position.copy(anchor);
+    model.add(pivot);
+    pivot.updateMatrixWorld(true);
+    pivot.attach(m);
+
+    // 轻微自转：按索引给确定性的小角度，避免随机抖动
+    const spin = { x: Math.sin(i * 2.4) * 0.07, y: Math.cos(i * 1.7) * 0.12, z: Math.sin(i * 3.1) * 0.05 };
+    const worldDist = (0.15 * CONFIG.targetHeight + box.getSize(new THREE.Vector3()).length() * 0.05);
+
+    state.parts.push({
+      pivot,
+      base: anchor.clone(),
+      dir,
+      dist: worldDist / unit,
+      spin,
+    });
+  });
+  console.info('[MK85] pivots built:', state.parts.length);
+}
+
+/** 拆解时轻微拉远 + 抬视点。用「锚点 + 绝对量」而不是增量，
+ *  这样窗口 resize、反复拆装都不会累积偏移。 */
+function applyFrame(k) {
+  const a = state.frameAnchor;
+  if (!a) return;
+  const dir = new THREE.Vector3().subVectors(camera.position, controls.target);
+  if (dir.lengthSq() < 1e-8) return;
+  dir.normalize();
+  controls.target.y = a.targetY + 0.12 * k;
+  camera.position.copy(controls.target).addScaledVector(dir, a.dist * (1 + 0.14 * k));
+  controls.update();
+}
+
+function applyExplode(k) {
+  for (const p of state.parts) {
+    p.pivot.position.copy(p.base).addScaledVector(p.dir, p.dist * k);
+    if (state.floorY !== undefined && p.pivot.position.y < state.floorY) p.pivot.position.y = state.floorY;
+    p.pivot.rotation.set(p.spin.x * k, p.spin.y * k, p.spin.z * k);
+  }
+  applyFrame(k);
+}
+
+function explode() {
+  if (!state.ready || state.exploded) return;
+  state.exploded = true;
+  if (!state.frameAnchor) {
+    state.frameAnchor = {
+      dist: camera.position.distanceTo(controls.target),
+      targetY: controls.target.y,
+    };
+  }
+  syncExplodeButtons();
+  tweens.add({ tag: 'explode', duration: 1.5, ease: 'outCubic', onUpdate: (_v, e) => applyExplode(e) });
+}
+
+function assemble() {
+  if (!state.ready || !state.exploded) return;
+  state.exploded = false;
+  syncExplodeButtons();
+  tweens.add({
+    tag: 'explode', duration: 1.3, ease: 'outCubic',
+    onUpdate: (_v, e) => applyExplode(1 - e),
+    onComplete: () => { state.frameAnchor = null; },
+  });
+}
+
+function syncExplodeButtons() {
+  $('btn-explode').classList.toggle('on', state.exploded);
+  $('btn-assemble').classList.toggle('on', !state.exploded);
+}
+
+/* ------------------------------------------------------------------ */
 /* 视角                                                                */
 /* ------------------------------------------------------------------ */
 function frameCamera(height) {
@@ -337,6 +473,8 @@ function resetView() {
   camera.position.copy(controls.target).addScaledVector(dir, d);
   camera.updateProjectionMatrix();
   controls.update();
+  state.frameAnchor = { dist: d, targetY: state.fit.targetY };
+  if (state.exploded) applyFrame(1);
 }
 
 /** 保存当前画面为 PNG（合成深色底，避免透明背景） */
@@ -366,6 +504,8 @@ function capture() {
 /* ------------------------------------------------------------------ */
 function initUI() {
   $('btn-rotate').addEventListener('click', () => toggleAuto());
+  $('btn-explode').addEventListener('click', explode);
+  $('btn-assemble').addEventListener('click', assemble);
   $('btn-material').addEventListener('click', () => {
     const order = ['suit', 'steel', 'matte'];
     setMode(order[(order.indexOf(state.mode) + 1) % order.length]);
@@ -382,6 +522,8 @@ function initUI() {
     if (k === ' ') { e.preventDefault(); toggleAuto(); }
     else if (k === 'm') $('btn-material').click();
     else if (k === 's') capture();
+    else if (k === 'e') explode();
+    else if (k === 'a') assemble();
     else if (k === 'r') resetView();
     else if (k === 'f') toggleFull();
   });
@@ -424,6 +566,7 @@ function tick() {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
 
+  tweens.update(dt);
   controls.autoRotate = state.auto && !state.dragging;
   controls.update(dt);
   renderer.render(scene, camera);
