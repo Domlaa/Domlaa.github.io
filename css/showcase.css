@@ -149,8 +149,13 @@ body {
   .stats { display: none; }
   .masthead h1 { font-size: 42px; }
   .sub { font-size: 11px; }
-  .toolbar { gap: 3px; padding: 5px; }
-  .toolbar button { font-size: 11px; padding: 8px 11px; }
+  /* 按钮多，窄屏改成 4 列网格：固定两行，不再挤成三行胶囊 */
+  .toolbar {
+    width: calc(100vw - 28px); gap: 4px; padding: 6px;
+    grid-template-columns: repeat(4, 1fr); display: grid;
+    border-radius: 18px;
+  }
+  .toolbar button { font-size: 11px; padding: 8px 4px; }
   #btn-full { display: none; }
 }
 @media (max-height: 520px) {

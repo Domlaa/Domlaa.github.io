@@ -15,6 +15,8 @@ const CONFIG = {
   targetHeight: 1.95,      // 归一化后模型高度（米）
   fov: 34,
   exposure: 1.02,
+  safeTop: 28,             // 顶部标题占位（px）
+  safeBottom: 100,         // 底部工具栏占位（px）
 };
 
 /* FBX 内的贴图是作者本机绝对路径（C:\Users\...\Metal019_2K_*.jpg），
@@ -27,6 +29,7 @@ const canvas = $('stage');
 
 const state = {
   mode: 'suit',         // suit | steel | matte
+  showBody: false,      // 人偶内衬默认隐藏，只展示外部战甲
   auto: true,
   dragging: false,
   ready: false,
@@ -206,8 +209,7 @@ function onLoaded(obj, started) {
   frameCamera(height);
   resetView();
 
-  $('st-mesh').textContent = meshes;
-  $('st-tris').textContent = state.tris.toLocaleString('en-US');
+  updateMeshStat();
   $('st-load').textContent = ms >= 1000 ? (ms / 1000).toFixed(1) + ' s' : ms + ' ms';
   $('st-load').classList.add('ok');
 
@@ -215,7 +217,7 @@ function onLoaded(obj, started) {
   setProgress(1, (CONFIG.fileBytes / 1048576).toFixed(1));
   setTimeout(() => $('loader').classList.add('done'), 260);
 
-  window.__MK85 = { THREE, scene, camera, renderer, controls, state, model, resetView, setMode, capture, explode, assemble, applyExplode };
+  window.__MK85 = { THREE, scene, camera, renderer, controls, state, model, resetView, setMode, setBodyVisible, capture, explode, assemble, applyExplode };
 }
 
 function normalize(obj) {
@@ -260,6 +262,10 @@ const PART_TONE = {
 const MATS = {};
 const SUIT_MATS = {};
 
+/** 人偶身体（内衬）部件：默认隐藏，只渲染外部战甲。
+ *  inner_armor 是贯穿全身的深色内衬（64k 面），neck 是颈内衬。 */
+const BODY_PARTS = new Set(['inner_armor', 'neck']);
+
 function buildMaterials() {
   MATS.steel = new THREE.MeshStandardMaterial({
     color: 0x77818d, metalness: 1.0, roughness: 0.2, envMapIntensity: 1.35,
@@ -292,16 +298,25 @@ function toneOf(name) {
 
 function dress() {
   buildMaterials();
+  let bodyCount = 0, bodyTris = 0;
   model.traverse((o) => {
     if (!o.isMesh) return;
     o.castShadow = true;
     o.receiveShadow = true;
     o.userData.origName = o.name || '(unnamed)';
+    o.userData.base = baseName(o.name);
     o.userData.tone = toneOf(o.name);
+    if (BODY_PARTS.has(o.userData.base)) {
+      bodyCount++;
+      bodyTris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position?.count || 0) / 3;
+    }
     if (o.geometry && !o.geometry.attributes.normal) o.geometry.computeVertexNormals();
   });
+  state.bodyCount = bodyCount;
+  state.bodyTris = Math.round(bodyTris);
   applyMode();
-  console.info('[MK85] meshes:', state.meshes, 'tris:', state.tris);
+  setBodyVisible(state.showBody);
+  console.info('[MK85] meshes:', state.meshes, 'body parts hidden:', bodyCount);
 }
 
 function applyMode() {
@@ -319,6 +334,42 @@ function setMode(mode) {
   const label = { suit: '战衣', steel: '钢', matte: '哑光' }[mode];
   $('btn-material').textContent = '材质 · ' + label;
   $('btn-material').classList.toggle('on', mode !== 'steel');
+}
+
+/** 显示 / 隐藏人偶身体（内衬）。隐藏时只渲染外部战甲外壳。 */
+function setBodyVisible(on) {
+  state.showBody = on;
+  if (!model) return;
+  model.traverse((o) => {
+    if (o.isMesh && BODY_PARTS.has(o.userData.base)) {
+      o.visible = on;
+      o.castShadow = on;
+    }
+  });
+  const b = $('btn-inner');
+  if (b) {
+    b.textContent = on ? '内衬 · 显' : '内衬 · 隐';
+    b.classList.toggle('on', on);
+  }
+  updateMeshStat();
+}
+
+/** 状态栏按「可见 / 总数」显示，避免隐藏内衬后数字对不上 */
+function updateMeshStat() {
+  const el = $('st-mesh');
+  if (!el || !state.meshes) return;
+  const hidden = state.bodyCount || 0;
+  el.textContent = state.showBody || !hidden
+    ? String(state.meshes)
+    : `${state.meshes - hidden} / ${state.meshes}`;
+  const t = $('st-tris');
+  if (t) {
+    const ht = state.bodyTris || 0;
+    const vis = state.tris - ht;
+    t.textContent = state.showBody || !ht
+      ? state.tris.toLocaleString('en-US')
+      : `${vis.toLocaleString('en-US')} / ${state.tris.toLocaleString('en-US')}`;
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -408,8 +459,8 @@ function applyFrame(k) {
   const dir = new THREE.Vector3().subVectors(camera.position, controls.target);
   if (dir.lengthSq() < 1e-8) return;
   dir.normalize();
-  controls.target.y = a.targetY + 0.12 * k;
-  camera.position.copy(controls.target).addScaledVector(dir, a.dist * (1 + 0.14 * k));
+  controls.target.y = a.targetY + 0.14 * k;
+  camera.position.copy(controls.target).addScaledVector(dir, a.dist * (1 + 0.19 * k));
   controls.update();
 }
 
@@ -458,9 +509,18 @@ function frameCamera(height) {
   const vFov = THREE.MathUtils.degToRad(CONFIG.fov);
   const fitH = (height / 2) / Math.tan(vFov / 2);
   const fitW = (height * 0.62) / (2 * Math.tan(vFov / 2) * Math.max(0.5, camera.aspect));
-  const margin = camera.aspect < 0.85 ? 1.34 : 1.18;
-  state.fit.dist = Math.max(fitH, fitW) * margin;
-  state.fit.targetY = height * 0.52;
+  const narrow = camera.aspect < 0.85;
+  const margin = narrow ? 1.42 : 1.22;
+  const d = Math.max(fitH, fitW) * margin;
+  state.fit.dist = d;
+  // 模型要在「避让顶部标题 / 底部工具栏」后的可视区里垂直居中，
+  // 否则脚会正好落在工具栏底下（900 高时差约 30px）。
+  const vh = window.innerHeight || 900;
+  const safeTop = narrow ? 132 : CONFIG.safeTop;
+  const safeBottom = narrow ? 148 : CONFIG.safeBottom;
+  const pxPerUnit = vh / (2 * Math.tan(vFov / 2) * d);
+  const shift = ((safeBottom - safeTop) / 2) / pxPerUnit;
+  state.fit.targetY = height * 0.5 - Math.min(Math.max(shift, -height * 0.08), height * 0.12);
   controls.minDistance = state.fit.dist * 0.34;
   controls.maxDistance = state.fit.dist * 2.6;
 }
@@ -513,6 +573,7 @@ function initUI() {
   $('btn-shot').addEventListener('click', capture);
   $('btn-reset').addEventListener('click', resetView);
   $('btn-full').addEventListener('click', toggleFull);
+  $('btn-inner').addEventListener('click', () => setBodyVisible(!state.showBody));
 
   canvas.addEventListener('dblclick', resetView);
 
@@ -521,6 +582,7 @@ function initUI() {
     const k = e.key.toLowerCase();
     if (k === ' ') { e.preventDefault(); toggleAuto(); }
     else if (k === 'm') $('btn-material').click();
+    else if (k === 'i') $('btn-inner').click();
     else if (k === 's') capture();
     else if (k === 'e') explode();
     else if (k === 'a') assemble();
