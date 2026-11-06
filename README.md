@@ -2,6 +2,13 @@
 
 实时渲染的钢铁侠战甲全息投影展示页，部署于 GitHub Pages：**https://domlaa.github.io/**
 
+站点含两个独立页面：
+
+| 页面 | 地址 | 模型 | 特点 |
+| --- | --- | --- | --- |
+| 全息拆解展示 | `/` | `assets/models/armor.glb`（1.2 万面） | 全息材质、10 模块拆解、HUD 指示线 |
+| MK85 实景模型 | `/mk85.html` | `assets/models/mk85.fbx`（62 万面） | 写实 PBR 渲染、28 个部件、材质切换、截图导出 |
+
 ![tech](https://img.shields.io/badge/Three.js-r187-7de8ff) ![tech](https://img.shields.io/badge/WebGL-2.0-7de8ff) ![tech](https://img.shields.io/badge/build-none-brightgreen)
 
 ---
@@ -32,11 +39,15 @@
 
 ```
 index.html                 入口（importmap + HUD 结构）
+mk85.html                  MK85 实景模型页
 css/hud.css                HUD 全部样式与响应式
-assets/models/armor.glb    战甲模型（部署用）
+css/showcase.css           模型展台样式
+assets/models/armor.glb    战甲模型（全息页，部署用）
+assets/models/mk85.fbx     MK85 模型（实景页，19 MB）
 lib/three/                 Three.js r187 + 本地化 addons
 js/
 ├─ main.js                 编排：加载 → 显现 → 渲染循环
+├─ showcase/main.js        MK85 页：FBX 加载 / 归一化 / 材质 / 取景
 ├─ config/armor.config.js  模块定义、切分阈值、拆解偏移、场景参数
 ├─ core/SceneManager.js    渲染器 / 相机 / OrbitControls / 辉光 / 平台网格
 ├─ model/
@@ -94,3 +105,33 @@ git add -A && git commit -m "feat: 3D 全息战甲展示系统" && git push
 ## 八、浏览器要求
 
 需支持 WebGL 2.0（Chrome / Edge / Firefox / Safari 15+）。不支持时会显示降级提示页。
+
+---
+
+## 九、MK85 实景模型页（`/mk85.html`）
+
+`assets/models/mk85.fbx` 与前一个 GLB 是两个不同来源的模型，这一页单独做，目标是**先保证稳定、正确地展示模型**，不加任何后处理特效。
+
+### 模型情况
+
+- 二进制 FBX 7400，19 MB，**28 个按解剖命名的部件**（`head` / `neck` / `chest` / `weist` / `hip` / `upper_arm` / `elbow` / `lower_leg` / `foot_left` …），共 624,342 三角面、187 万顶点。
+- **贴图不可用**：FBX 内记录的是作者本机绝对路径（`C:\Users\jedid\Desktop\Textures\[2K]Metal002\Metal019_2K_Color.jpg`），文件未随模型提供。加载时用一张 1×1 白图顶掉这些请求，避免 404 刷屏。
+
+### 因此做了什么
+
+- **归一化**：按包围盒把模型缩放到统一 1.95 高度、水平居中、脚底贴地，再据此自动计算相机距离 —— 换任何尺寸单位的模型都不会跑飞或过大过小。
+- **按部件上色**：既然贴图缺失，就利用部件名建立 `部件 → 色调` 映射（头/膝/腕/腰为金，躯干四肢为红，内衬与颈部为暗色），还原 MK85 的红金配色；另有「钢」与「哑光」两种材质用于观察造型。
+- **材质与环境**：`MeshStandardMaterial` + `RoomEnvironment` 生成的 PMREM 环境贴图（金属没有环境反射会发黑），三点布光 + 方向光阴影 + 径向渐隐接影地面。
+- **交互**：OrbitControls 拖拽/缩放/双击复位、自动旋转、材质切换、全屏、**保存当前画面为 PNG**（合成深色底，不含 UI）。
+- **加载体验**：显示真实进度百分比与已下载 MB 数；失败时展示错误信息而不是白屏。
+- **取景**：窄屏（`aspect < 0.85`）自动放大留白，避免头部压住标题、脚被底部工具栏遮挡；窗口尺寸变化后自动重新取景。
+
+### 换模型只需改两处
+
+```js
+// js/showcase/main.js 顶部
+const CONFIG = { url: '../../assets/models/mk85.fbx', fileBytes: 19926540, targetHeight: 1.95, ... };
+
+// 若新模型部件名不同，补一张映射表即可（未命中时按 leg/arm/hip 等关键词兜底）
+const PART_TONE = { head: 'gold', chest: 'red', ... };
+```

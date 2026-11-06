@@ -1,0 +1,157 @@
+/* ============ MARK LXXXV · 模型展台 ============ */
+:root {
+  --ink: #f2f5f8;
+  --dim: #7c8896;
+  --gold: #e8b45a;
+  --gold-soft: rgba(232, 180, 90, .55);
+  --line: rgba(255, 255, 255, .13);
+  --glass: rgba(14, 18, 24, .52);
+  --mono: "SFMono-Regular", "SF Mono", Consolas, "Roboto Mono", ui-monospace, monospace;
+  --sans: -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background:
+    radial-gradient(120% 90% at 50% 8%, #1b232e 0%, #0d1218 42%, #05070a 100%);
+  color: var(--ink);
+  font-family: var(--sans);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; z-index: 1; touch-action: none; }
+
+.vignette {
+  position: fixed; inset: 0; z-index: 2; pointer-events: none;
+  background: radial-gradient(circle at 50% 46%, transparent 40%, rgba(0, 0, 0, .55) 100%);
+}
+.grain {
+  position: fixed; inset: 0; z-index: 2; pointer-events: none; opacity: .035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ---------- 标题 ---------- */
+.masthead {
+  position: fixed; top: clamp(22px, 4vh, 44px); left: clamp(20px, 3.4vw, 52px);
+  z-index: 4; pointer-events: none;
+}
+.eyebrow {
+  margin: 0 0 10px; font-family: var(--mono); font-size: 10.5px; letter-spacing: .34em;
+  color: var(--gold); text-transform: uppercase; opacity: .9;
+}
+.masthead h1 {
+  margin: 0; font-size: clamp(38px, 5.4vw, 68px); line-height: .92; font-weight: 800;
+  letter-spacing: -.03em; color: #fff;
+}
+.masthead h1 span { color: transparent; -webkit-text-stroke: 1.4px var(--gold); margin-left: 2px; }
+.sub {
+  margin: 14px 0 0; font-size: 12.5px; letter-spacing: .06em; color: var(--dim);
+  border-left: 1px solid var(--line); padding-left: 10px;
+}
+
+/* ---------- 右上数据 ---------- */
+.stats {
+  position: fixed; top: clamp(22px, 4vh, 44px); right: clamp(20px, 3.4vw, 52px);
+  z-index: 4; display: grid; gap: 8px; text-align: right;
+  font-family: var(--mono); font-size: 11px; letter-spacing: .08em;
+}
+.stat { display: flex; gap: 12px; justify-content: flex-end; align-items: baseline; }
+.stat .k { color: var(--dim); font-size: 9.5px; letter-spacing: .2em; }
+.stat .v { color: var(--ink); min-width: 62px; font-variant-numeric: tabular-nums; }
+.stat .v.ok { color: #8fe4b0; }
+
+/* ---------- 底部工具栏 ---------- */
+.toolbar {
+  position: fixed; left: 50%; bottom: clamp(18px, 3.2vh, 34px); transform: translateX(-50%);
+  z-index: 5; display: flex; gap: 6px; padding: 6px;
+  background: var(--glass); border: 1px solid var(--line); border-radius: 999px;
+  backdrop-filter: blur(12px) saturate(130%); -webkit-backdrop-filter: blur(12px) saturate(130%);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .45);
+  max-width: calc(100vw - 24px); flex-wrap: wrap; justify-content: center;
+}
+.toolbar button {
+  appearance: none; border: 1px solid transparent; background: transparent; color: #b9c4d0;
+  font-family: var(--sans); font-size: 12px; letter-spacing: .04em;
+  padding: 9px 15px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+  transition: color .18s, background .18s, border-color .18s;
+}
+.toolbar button:hover { color: #fff; background: rgba(255, 255, 255, .07); }
+.toolbar button:focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
+.toolbar button.on {
+  color: #0b0e12; background: var(--gold); border-color: var(--gold); font-weight: 600;
+}
+.toolbar button.on:hover { background: #f0c272; }
+
+/* ---------- 提示 / 返回 ---------- */
+.hint {
+  position: fixed; left: clamp(20px, 3.4vw, 52px); bottom: clamp(20px, 3.4vh, 36px);
+  z-index: 4; margin: 0; font-family: var(--mono); font-size: 10.5px;
+  letter-spacing: .12em; color: rgba(255, 255, 255, .32);
+}
+.back {
+  position: fixed; top: clamp(22px, 4vh, 44px); left: 50%; transform: translateX(-50%);
+  z-index: 5; font-family: var(--mono); font-size: 10.5px; letter-spacing: .18em;
+  color: rgba(255, 255, 255, .42); text-decoration: none; padding: 6px 10px;
+  border: 1px solid transparent; border-radius: 999px; transition: .2s;
+}
+.back:hover { color: var(--gold); border-color: var(--line); }
+
+/* ---------- 加载 ---------- */
+.loader {
+  position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 16px;
+  background: #06090d; transition: opacity .5s ease, visibility .5s;
+}
+.loader.done { opacity: 0; visibility: hidden; }
+.ring { width: 68px; height: 68px; transform: rotate(-90deg); }
+.ring-bg { fill: none; stroke: rgba(255, 255, 255, .09); stroke-width: 2; }
+.ring-fg {
+  fill: none; stroke: var(--gold); stroke-width: 2.5; stroke-linecap: round;
+  stroke-dasharray: 169.6; stroke-dashoffset: 169.6;
+  transition: stroke-dashoffset .25s ease;
+  filter: drop-shadow(0 0 6px rgba(232, 180, 90, .5));
+}
+.ld-title { margin: 0; font-size: 13px; letter-spacing: .22em; color: #cfd8e2; }
+.bar { width: min(240px, 62vw); height: 2px; background: rgba(255, 255, 255, .12); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--gold); transition: width .25s ease; }
+.ld-meta {
+  margin: 0; display: flex; gap: 26px; font-family: var(--mono); font-size: 10px;
+  letter-spacing: .14em; color: var(--dim); font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 错误 ---------- */
+.error {
+  position: fixed; inset: 0; z-index: 25; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 12px;
+  background: rgba(6, 9, 13, .96); padding: 24px; text-align: center;
+}
+.error.hidden { display: none; }
+.err-title { margin: 0; font-size: 16px; letter-spacing: .16em; color: #ff8080; }
+.err-msg { margin: 0; max-width: 460px; font-family: var(--mono); font-size: 11.5px; color: var(--dim); line-height: 1.7; word-break: break-all; }
+.error button {
+  margin-top: 8px; padding: 9px 20px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--line); background: transparent; color: var(--ink); font-size: 12px;
+}
+.error button:hover { border-color: var(--gold); color: var(--gold); }
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 860px) {
+  .back { display: none; }
+  .stats { gap: 5px; font-size: 10px; }
+  .stat .v { min-width: 48px; }
+  .hint { display: none; }
+}
+@media (max-width: 560px) {
+  .stats { display: none; }
+  .masthead h1 { font-size: 42px; }
+  .sub { font-size: 11px; }
+  .toolbar { gap: 3px; padding: 5px; }
+  .toolbar button { font-size: 11px; padding: 8px 11px; }
+}
+@media (max-height: 520px) {
+  .masthead { display: none; }
+}
