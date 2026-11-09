@@ -17,7 +17,9 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { splitArmorMeshes, SPLIT_DEFS } from './segment.js';
 
 const CONFIG = {
-  url: '../assets/models/armor2.glb',
+  // 相对「文档」解析（不是相对本模块）：两页都在站点根目录，用 ./assets 可同时
+  // 兼容根路径部署（GitHub Pages 用户站）与子路径部署（项目站 / 本地预览沙箱）。
+  url: './assets/models/armor2.glb',
   targetHeight: 1.95,
   fov: 32,
   exposure: 1.08,
@@ -40,6 +42,8 @@ const state = {
   prevSurface: 1.0,     // 仅线条恢复时用
   lineColor: '#dbedff', // 亮线 / 流光颜色
   flow: true,           // 线条流光
+  bg: true,             // 3D 空间背景
+  time: 0,              // 全局动画时钟（流光 / 背景共用）
   split: false,         // 拆解状态
   modules: [],          // 切分出的装甲模块
   zoomAnim: null,       // 拆/合时的相机后拉补间
@@ -110,6 +114,186 @@ function makeContactShadow() {
 }
 const contactShadow = makeContactShadow();
 scene.add(contactShadow);
+
+/* ------------------------------------------------------------------ */
+/* 3D 空间背景                                                          */
+/* ------------------------------------------------------------------ */
+/*
+ * 组成：渐变穹顶 + 星尘粒子 + 环形竖向光柱 + 垂直来回扫描环 + 极坐标地面网格。
+ *
+ * 与三通道管线的兼容约定：
+ *  - 全部元素「纯加色」混合（RGB 直接相加），且 alpha 输出恒为 0 —— 颜色通道
+ *    渲染目标里装甲 alpha=1、背景 alpha≈0，合成通道据此把背景排除在
+ *    「亮度边缘检测」与「局部对比增强」之外，扫描环/星尘再亮也不会画出假线条；
+ *  - 深度全部不写入 → 不影响深度边缘；
+ *  - 法线通道中整体隐藏（见 renderFrame）→ 不产生法线边缘。
+ */
+const PURE_ADD = {
+  blending: THREE.CustomBlending,
+  blendEquation: THREE.AddEquation,
+  blendSrc: THREE.OneFactor,
+  blendDst: THREE.OneFactor,
+  blendSrcAlpha: THREE.ZeroFactor,
+  blendDstAlpha: THREE.OneFactor,
+};
+
+const bgFx = {
+  group: new THREE.Group(),
+  uTime: { value: 0 },
+  uColor: { value: new THREE.Color(state.lineColor) },  // 随线条颜色联动
+  rings: [],
+};
+
+(function buildBackground() {
+  const g = bgFx.group;
+
+  // 1) 渐变穹顶：地平线微光 + 顶部微亮的深空底色（替代平板纯色背景）
+  const domeMat = new THREE.ShaderMaterial({
+    uniforms: { uColor: bgFx.uColor },
+    vertexShader: /* glsl */`
+      varying vec3 vDir;
+      void main() {
+        vDir = normalize(position);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: /* glsl */`
+      precision highp float;
+      varying vec3 vDir;
+      uniform vec3 uColor;
+      void main() {
+        float h = vDir.y * 0.5 + 0.5;
+        vec3 col = mix(vec3(0.008, 0.012, 0.019), vec3(0.020, 0.030, 0.046), smoothstep(0.0, 0.55, h));
+        col = mix(col, vec3(0.038, 0.055, 0.080), smoothstep(0.55, 1.0, h));
+        col += uColor * 0.05 * exp(-pow((h - 0.48) * 9.0, 2.0));   // 地平线微光
+        gl_FragColor = vec4(col, 0.0);
+      }`,
+    side: THREE.BackSide, depthWrite: false, transparent: true, ...PURE_ADD,
+  });
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(30, 48, 24), domeMat);
+  dome.renderOrder = -10;
+  dome.frustumCulled = false;
+  g.add(dome);
+
+  // 2) 星尘粒子：球壳分布，缓慢闪烁
+  {
+    const N = 560;
+    const pos = new Float32Array(N * 3);
+    const seed = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      const u = Math.random() * 2 - 1;
+      const th = Math.random() * Math.PI * 2;
+      const r = 7 + Math.random() * 9;
+      const s = Math.sqrt(Math.max(0, 1 - u * u));
+      pos[i * 3] = r * s * Math.cos(th);
+      pos[i * 3 + 1] = Math.max(0.1, r * u * 0.75 + 1.0);
+      pos[i * 3 + 2] = r * s * Math.sin(th);
+      seed[i] = Math.random();
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { uTime: bgFx.uTime, uColor: bgFx.uColor },
+      vertexShader: /* glsl */`
+        attribute float aSeed;
+        uniform float uTime;
+        varying float vTw;
+        void main() {
+          vTw = 0.5 + 0.5 * sin(uTime * (0.5 + aSeed * 1.6) + aSeed * 97.0);
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = (1.3 + fract(aSeed * 43.7) * 2.2) * (18.0 / max(1.0, -mv.z));
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: /* glsl */`
+        precision highp float;
+        uniform vec3 uColor;
+        varying float vTw;
+        void main() {
+          float d = length(gl_PointCoord - 0.5);
+          float a = smoothstep(0.5, 0.06, d);
+          gl_FragColor = vec4(uColor * (0.30 + 0.55 * vTw) * a, 0.0);
+        }`,
+      transparent: true, depthWrite: false, ...PURE_ADD,
+    });
+    const pts = new THREE.Points(geo, mat);
+    pts.frustumCulled = false;
+    g.add(pts);
+  }
+
+  // 3) 环形竖向光柱：围绕战甲的一圈细光柱，亮度各自缓慢起伏
+  {
+    const beamGeo = new THREE.CylinderGeometry(0.012, 0.012, 2.7, 6, 1, true);
+    for (let i = 0; i < 14; i++) {
+      const ang = (i / 14) * Math.PI * 2;
+      const mat = new THREE.ShaderMaterial({
+        uniforms: {
+          uTime: bgFx.uTime, uColor: bgFx.uColor,
+          uPhase: { value: (i / 14) * Math.PI * 6.0 },
+        },
+        vertexShader: /* glsl */`
+          varying vec2 vUv;
+          void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: /* glsl */`
+          precision highp float;
+          varying vec2 vUv;
+          uniform float uTime, uPhase;
+          uniform vec3 uColor;
+          void main() {
+            float fade = pow(1.0 - abs(vUv.y - 0.5) * 2.0, 1.6);          // 两端渐隐
+            float flick = 0.55 + 0.45 * sin(uTime * 0.9 + uPhase);
+            gl_FragColor = vec4(uColor * fade * flick * 0.14, 0.0);
+          }`,
+        transparent: true, depthWrite: false, side: THREE.DoubleSide, ...PURE_ADD,
+      });
+      const beam = new THREE.Mesh(beamGeo, mat);
+      beam.position.set(Math.cos(ang) * 1.5, 1.32, Math.sin(ang) * 1.5);
+      g.add(beam);
+    }
+  }
+
+  // 4) 垂直扫描环：水平光环沿 Y 轴上下往返（余弦驱动 → 自带缓入缓出）
+  {
+    const ringGeo = new THREE.CylinderGeometry(1.18, 1.18, 0.55, 96, 1, true);
+    const mkRing = (bright, dashes) => new THREE.Mesh(ringGeo, new THREE.ShaderMaterial({
+      uniforms: { uColor: bgFx.uColor, uBright: { value: bright }, uDash: { value: dashes } },
+      vertexShader: /* glsl */`
+        varying vec2 vUv;
+        void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: /* glsl */`
+        precision highp float;
+        varying vec2 vUv;
+        uniform vec3 uColor;
+        uniform float uBright, uDash;
+        void main() {
+          float band = pow(1.0 - abs(vUv.y - 0.5) * 2.0, 2.6);            // 竖向亮核
+          float dash = 0.7 + 0.3 * sin(vUv.x * 6.2832 * 90.0);            // 细刻度纹理
+          gl_FragColor = vec4(uColor * band * mix(1.0, dash, uDash) * uBright, 0.0);
+        }`,
+      transparent: true, depthWrite: false, side: THREE.DoubleSide, ...PURE_ADD,
+    }));
+    const r1 = mkRing(0.85, 1.0);   // 主环：带刻度
+    const r2 = mkRing(0.30, 0.0);   // 副环：无刻度、错相慢速
+    g.add(r1, r2);
+    bgFx.rings.push(
+      { mesh: r1, min: 0.05, max: 1.98, speed: 0.85, phase: 0 },
+      { mesh: r2, min: 0.10, max: 1.90, speed: 0.55, phase: 2.2 },
+    );
+  }
+
+  // 5) 极坐标地面网格（静态，颜色取线条色的暗调）
+  {
+    const c = new THREE.Color(state.lineColor);
+    const grid = new THREE.PolarGridHelper(5.4, 12, 9, 72, c.clone().multiplyScalar(0.30), c.clone().multiplyScalar(0.12));
+    grid.material.transparent = true;
+    grid.material.opacity = 0.5;
+    grid.material.depthWrite = false;
+    Object.assign(grid.material, PURE_ADD);
+    grid.position.y = 0.0015;
+    g.add(grid);
+  }
+})();
+bgFx.group.visible = state.bg;
+scene.add(bgFx.group);
 
 /* ------------------------------------------------------------------ */
 /* 离屏目标                                                             */
@@ -192,29 +376,36 @@ const edgeMat = new THREE.ShaderMaterial({
       float dEdge = smoothstep(0.0012, 0.010, lap / max(dC, 1e-4));
 
       // 亮度边缘（贴图里烘焙的细缝）
+      // alpha 遮罩：装甲 alpha=1、3D 背景 alpha≈0 → 背景的亮暗变化不产生假线条
+      float mask = texture2D(tColor, vUv).a;
       float lxC = lum(vUv);
       float lx = lum(vUv + vec2(o.x, 0.0)) - lum(vUv - vec2(o.x, 0.0));
       float ly = lum(vUv + vec2(0.0, o.y)) - lum(vUv - vec2(0.0, o.y));
-      float lumEdge = smoothstep(0.05, 0.28, length(vec2(lx, ly)));
+      float lumEdge = smoothstep(0.05, 0.28, length(vec2(lx, ly))) * mask;
 
-      // 局部对比：让凹槽 / 螺栓浮出来
+      // 局部对比：让凹槽 / 螺栓浮出来（同样仅作用于装甲）
       float blur = 0.25 * (lum(vUv + vec2(o.x, o.y) * 2.0) + lum(vUv + vec2(-o.x, o.y) * 2.0)
                          + lum(vUv + vec2(o.x, -o.y) * 2.0) + lum(vUv + vec2(-o.x, -o.y) * 2.0));
-      col *= clamp(1.0 + (lxC - blur) * uDetail, 0.35, 2.2);
+      col *= clamp(1.0 + (lxC - blur) * uDetail * mask, 0.35, 2.2);
 
       float edge = clamp(nEdge * uNormalW + dEdge * uDepthW + lumEdge * uLumW, 0.0, 1.0) * uStrength;
 
       // 表面压暗后暗线会不可见：表面越暗，线条自动越亮
       float lineLight = clamp(uLight + 1.0 - smoothstep(0.0, 0.55, uSurface), 0.0, 1.0);
 
-      // 流光脉冲：一道亮带沿屏幕自下而上扫过（纯线稿模式下同样有效）
+      // 流光脉冲 v2：窄亮核 + 长拖尾。开启流光时基线压暗到 0.78×、峰值提到
+      // ≈3.1× 线色 —— 流光与静态线条的亮度比从 ~2.1:1 拉开到 ~4:1
       float fy = fract(vUv.y * 1.35 - uTime * 0.22);
-      float pulse = smoothstep(0.0, 0.16, fy) * smoothstep(0.34, 0.16, fy) * uFlow;
+      float head = smoothstep(0.075, 0.012, fy);                     // 前缘锐利的窄亮核
+      float tail = pow(max(1.0 - fy * 2.35, 0.0), 2.2) * 0.46;       // 指数衰减拖尾
+      float pulse = clamp(head + tail * (1.0 - head * 0.55), 0.0, 1.0) * uFlow;
 
       vec3 ink = vec3(0.012, 0.017, 0.024);
-      vec3 lineCol = mix(ink, uLineColor, lineLight);
-      lineCol = mix(lineCol, uLineColor * (1.18 + 0.95 * pulse), pulse);
-      col = mix(col, lineCol, edge * mix(0.92, 0.5, lineLight) * (1.0 + pulse * 0.3));
+      float baseDim = mix(1.0, 0.78, clamp(uFlow * 1.1, 0.0, 1.0));  // 流光开启 → 基线略压暗
+      vec3 lineCol = mix(ink, uLineColor * baseDim, lineLight);
+      vec3 pulseCol = uLineColor * (1.75 + 1.35 * pulse);
+      lineCol = mix(lineCol, pulseCol, pulse);
+      col = mix(col, lineCol, edge * mix(0.92, 0.5, lineLight) * (1.0 + pulse * 0.55));
 
       gl_FragColor = vec4(col, 1.0);
       #include <colorspace_fragment>
@@ -428,19 +619,21 @@ async function boot() {
 /* 渲染                                                                */
 /* ------------------------------------------------------------------ */
 function renderFrame() {
-  // 法线通道（接影面不参与边缘检测，否则会画出矩形边界）
+  // 法线通道（接影面 / 3D 背景不参与边缘检测，否则会画出矩形边界或假线条）
   if (contactShadow) contactShadow.visible = false;
+  bgFx.group.visible = false;
   scene.overrideMaterial = normalMat;
   renderer.setRenderTarget(normalRT);
   renderer.setClearColor(0x8080ff, 1);
   renderer.clear();
   renderer.render(scene, camera);
   scene.overrideMaterial = null;
+  bgFx.group.visible = state.bg;
   if (contactShadow) contactShadow.visible = true;
 
-  // 颜色 + 深度
+  // 颜色 + 深度（alpha 清 0：装甲写 1，背景保持 ≈0，供合成通道做遮罩）
   renderer.setRenderTarget(beautyRT);
-  renderer.setClearColor(0x0a0e13, 1);
+  renderer.setClearColor(0x0a0e13, 0);
   renderer.clear();
   renderer.render(scene, camera);
 
@@ -496,8 +689,17 @@ function tick() {
   edgeMat.uniforms.uThickness.value = state.width;
   edgeMat.uniforms.uLight.value = state.invert ? 1 : 0;
   edgeMat.uniforms.uSurface.value = state.surface;
-  edgeMat.uniforms.uTime.value += dt;
+  state.time += dt;
+  edgeMat.uniforms.uTime.value = state.time;
   edgeMat.uniforms.uFlow.value = state.flow ? 0.9 : 0;
+
+  // 背景动画：闪烁 / 光柱起伏 + 扫描环垂直往返（余弦 → 自带缓入缓出）
+  if (state.bg) {
+    bgFx.uTime.value = state.time;
+    for (const r of bgFx.rings) {
+      r.mesh.position.y = r.min + (r.max - r.min) * (0.5 - 0.5 * Math.cos(state.time * r.speed + r.phase));
+    }
+  }
 
   renderFrame();
 
@@ -545,6 +747,13 @@ function setInvert(on) {
   const b = $('btn-invert');
   b.textContent = on ? '亮线' : '暗线';
   b.classList.toggle('on', on);
+}
+
+/** 3D 空间背景开关 */
+function setBackground(on) {
+  state.bg = on;
+  bgFx.group.visible = on;
+  $('btn-bg').classList.toggle('on', on);
 }
 
 /** 仅线条：表面归零；恢复时回到之前的表面值 */
@@ -639,9 +848,11 @@ function initUI() {
     state.flow = !state.flow;
     $('btn-flow').classList.toggle('on', state.flow);
   });
+  $('btn-bg').addEventListener('click', () => setBackground(!state.bg));
   $('in-color').addEventListener('input', (e) => {
     state.lineColor = e.target.value;
     edgeMat.uniforms.uLineColor.value.set(state.lineColor);
+    bgFx.uColor.value.set(state.lineColor);   // 背景色随线条颜色联动
   });
   $('btn-reset').addEventListener('click', resetView);
   $('btn-shot').addEventListener('click', capture);
@@ -664,6 +875,7 @@ function initUI() {
     else if (k === 'o') $('btn-lineonly').click();
     else if (k === 'e') toggleSplit();
     else if (k === 'g') $('btn-flow').click();
+    else if (k === 'b') setBackground(!state.bg);
     else if (k === 'f') $('btn-full').click();
   });
 
@@ -675,4 +887,4 @@ initUI();
 boot().then(() => { if (state.ready) tick(); });
 
 // 测试钩子
-window.__MK7 = { THREE, scene, camera, renderer, controls, edgeMat, CONFIG, state, get model() { return model; }, resetView, capture };
+window.__MK7 = { THREE, scene, camera, renderer, controls, edgeMat, CONFIG, state, bgFx, get model() { return model; }, resetView, capture };

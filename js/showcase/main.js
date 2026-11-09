@@ -10,7 +10,9 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { TweenEngine } from '../animation/TweenEngine.js';
 
 const CONFIG = {
-  url: '../../assets/models/mk85.fbx',
+  // 相对「文档」解析（不是相对本模块）：两页都在站点根目录，用 ./assets 可同时
+  // 兼容根路径部署（GitHub Pages 用户站）与子路径部署（项目站 / 本地预览沙箱）。
+  url: './assets/models/mk85.fbx',
   fileBytes: 19926540,
   targetHeight: 1.95,      // 归一化后模型高度（米）
   fov: 34,
