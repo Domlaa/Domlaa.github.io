@@ -161,3 +161,6 @@ body {
 @media (max-height: 520px) {
   .masthead { display: none; }
 }
+
+/* 第二个返回链接：错开位置，避免与「全息展示」重叠 */
+.back2 { right: calc(clamp(20px, 3.4vw, 52px) + 104px); }
