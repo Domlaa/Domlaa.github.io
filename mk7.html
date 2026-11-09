@@ -34,6 +34,7 @@
 <nav class="toolbar" aria-label="渲染控制">
   <div class="tb-row">
     <button id="btn-rotate" class="on" title="自动旋转 (Space)">自动旋转</button>
+    <button id="btn-lineonly" title="仅显示线条，隐藏装甲表面 (O)">仅线条</button>
     <button id="btn-invert" title="暗线 / 亮线 (L)">暗线</button>
     <button id="btn-reset" title="重置视角 (R)">重置</button>
     <button id="btn-shot" title="保存画面 (S)">截图</button>
@@ -48,10 +49,14 @@
       <span>粗细</span>
       <input id="rg-width" type="range" min="0.4" max="2.2" step="0.05" value="1.05">
     </label>
+    <label class="slider" title="装甲表面颜色与亮度（0 = 纯线稿）">
+      <span>表面</span>
+      <input id="rg-surface" type="range" min="0" max="1" step="0.01" value="1">
+    </label>
   </div>
 </nav>
 
-<p class="hint">拖拽旋转 · 滚轮缩放 · 双击重置 · L 切换线色</p>
+<p class="hint">拖拽旋转 · 滚轮缩放 · 双击重置 · L 线色 · O 纯线稿</p>
 <a class="back" href="./mk85.html">MK85 实景 →</a>
 
 <div class="loader" id="loader">

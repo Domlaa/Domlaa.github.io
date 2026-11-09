@@ -99,6 +99,8 @@ body {
   appearance: none; width: 11px; height: 11px; margin-top: -4.5px; border-radius: 50%;
   background: var(--accent); box-shadow: 0 0 8px rgba(255, 207, 107, .6);
 }
+.slider input[type="range"]:disabled { opacity: .35; cursor: default; }
+.slider input[type="range"]:disabled::-webkit-slider-thumb { box-shadow: none; }
 .slider input[type="range"]::-moz-range-track { height: 2px; background: rgba(255, 255, 255, .18); }
 .slider input[type="range"]::-moz-range-thumb {
   width: 11px; height: 11px; border: 0; border-radius: 50%; background: var(--accent);

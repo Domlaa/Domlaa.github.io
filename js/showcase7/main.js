@@ -34,6 +34,9 @@ const state = {
   invert: false,        // false=暗线 true=亮线
   strength: 0.85,
   width: 1.05,
+  surface: 1.0,         // 装甲表面存在感：1=全彩，0=纯线稿（去饱和 + 压暗）
+  lineOnly: false,
+  prevSurface: 1.0,     // 仅线条恢复时用
   fit: { dist: 4, targetY: 1 },
   dragging: false,
 };
@@ -130,6 +133,7 @@ const edgeMat = new THREE.ShaderMaterial({
     uLumW: { value: 0.4 },
     uDetail: { value: 0.9 },
     uLight: { value: 0 },
+    uSurface: { value: state.surface },
     uNear: { value: camera.near },
     uFar: { value: camera.far },
   },
@@ -142,7 +146,7 @@ const edgeMat = new THREE.ShaderMaterial({
     varying vec2 vUv;
     uniform sampler2D tColor, tNormal, tDepth;
     uniform vec2 uTexel;
-    uniform float uStrength, uThickness, uNormalW, uDepthW, uNear, uFar, uLight, uLumW, uDetail;
+    uniform float uStrength, uThickness, uNormalW, uDepthW, uNear, uFar, uLight, uLumW, uDetail, uSurface;
 
     float linDepth(vec2 uv) {
       float z = texture2D(tDepth, uv).x;
@@ -155,6 +159,12 @@ const edgeMat = new THREE.ShaderMaterial({
     void main() {
       vec2 o = uTexel * uThickness;
       vec3 col = texture2D(tColor, vUv).rgb;
+
+      // 表面控制：去饱和 + 压暗（0 = 纯线稿底色，1 = 原样）
+      {
+        float g = dot(col, vec3(0.2126, 0.7152, 0.0722));
+        col = mix(vec3(g), col, uSurface) * mix(0.16, 1.0, uSurface);
+      }
 
       // 法线边缘
       vec3 nC = nrm(vUv);
@@ -184,10 +194,12 @@ const edgeMat = new THREE.ShaderMaterial({
 
       float edge = clamp(nEdge * uNormalW + dEdge * uDepthW + lumEdge * uLumW, 0.0, 1.0) * uStrength;
 
+      // 表面压暗后暗线会不可见：表面越暗，线条自动越亮
+      float lineLight = clamp(uLight + 1.0 - smoothstep(0.0, 0.55, uSurface), 0.0, 1.0);
       vec3 ink = vec3(0.012, 0.017, 0.024);
       vec3 glow = vec3(0.86, 0.93, 1.0);
-      vec3 lineCol = mix(ink, glow, uLight);
-      col = mix(col, lineCol, edge * mix(0.92, 0.5, uLight));
+      vec3 lineCol = mix(ink, glow, lineLight);
+      col = mix(col, lineCol, edge * mix(0.92, 0.5, lineLight));
 
       gl_FragColor = vec4(col, 1.0);
       #include <colorspace_fragment>
@@ -423,6 +435,7 @@ function tick() {
   edgeMat.uniforms.uStrength.value = state.showLine ? state.strength : 0;
   edgeMat.uniforms.uThickness.value = state.width;
   edgeMat.uniforms.uLight.value = state.invert ? 1 : 0;
+  edgeMat.uniforms.uSurface.value = state.surface;
 
   renderFrame();
 
@@ -472,6 +485,22 @@ function setInvert(on) {
   b.classList.toggle('on', on);
 }
 
+/** 仅线条：表面归零；恢复时回到之前的表面值 */
+function setLineOnly(on) {
+  state.lineOnly = on;
+  if (on) {
+    state.prevSurface = state.surface > 0.02 ? state.surface : 1.0;
+    state.surface = 0;
+  } else {
+    state.surface = state.prevSurface;
+  }
+  const btn = $('btn-lineonly');
+  btn.classList.toggle('on', on);
+  const rg = $('rg-surface');
+  rg.value = String(state.surface);
+  rg.disabled = on;
+}
+
 function capture() {
   if (!state.ready) return;
   renderFrame();
@@ -503,6 +532,15 @@ function initUI() {
     $('st-line').textContent = Math.round(state.strength * 100) + '%';
   });
   $('rg-width').addEventListener('input', (e) => { state.width = parseFloat(e.target.value); });
+  $('rg-surface').addEventListener('input', (e) => {
+    state.surface = parseFloat(e.target.value);
+    if (state.lineOnly && state.surface > 0.02) {
+      state.lineOnly = false;
+      $('btn-lineonly').classList.remove('on');
+      $('rg-surface').disabled = false;
+    }
+  });
+  $('btn-lineonly').addEventListener('click', () => setLineOnly(!state.lineOnly));
   $('btn-invert').addEventListener('click', () => setInvert(!state.invert));
   $('btn-reset').addEventListener('click', resetView);
   $('btn-shot').addEventListener('click', capture);
@@ -522,6 +560,7 @@ function initUI() {
     else if (k === 'r') resetView();
     else if (k === 's') capture();
     else if (k === 'l') setInvert(!state.invert);
+    else if (k === 'o') $('btn-lineonly').click();
     else if (k === 'f') $('btn-full').click();
   });
 
