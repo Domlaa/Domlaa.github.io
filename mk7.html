@@ -35,7 +35,12 @@
   <div class="tb-row">
     <button id="btn-rotate" class="on" title="自动旋转 (Space)">自动旋转</button>
     <button id="btn-lineonly" title="仅显示线条，隐藏装甲表面 (O)">仅线条</button>
+    <button id="btn-split" title="拆卸 / 合并装甲 (E)">拆卸</button>
+    <button id="btn-flow" class="on" title="线条流光 (G)">流光</button>
     <button id="btn-invert" title="暗线 / 亮线 (L)">暗线</button>
+    <label class="picker" title="线条颜色">
+      <input id="in-color" type="color" value="#dbedff">
+    </label>
     <button id="btn-reset" title="重置视角 (R)">重置</button>
     <button id="btn-shot" title="保存画面 (S)">截图</button>
     <button id="btn-full" title="全屏 (F)">全屏</button>
@@ -56,7 +61,7 @@
   </div>
 </nav>
 
-<p class="hint">拖拽旋转 · 滚轮缩放 · 双击重置 · L 线色 · O 纯线稿</p>
+<p class="hint">拖拽旋转 · 滚轮缩放 · 双击重置 · L 线色 · O 纯线稿 · E 拆卸 · G 流光</p>
 <a class="back" href="./mk85.html">MK85 实景 →</a>
 
 <div class="loader" id="loader">

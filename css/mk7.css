@@ -99,6 +99,18 @@ body {
   appearance: none; width: 11px; height: 11px; margin-top: -4.5px; border-radius: 50%;
   background: var(--accent); box-shadow: 0 0 8px rgba(255, 207, 107, .6);
 }
+.picker {
+  display: flex; align-items: center; padding: 0 8px 0 6px;
+}
+.picker input[type="color"] {
+  appearance: none; -webkit-appearance: none;
+  width: 20px; height: 20px; padding: 0; border: 1px solid rgba(255, 255, 255, .28);
+  border-radius: 50%; background: transparent; cursor: pointer;
+}
+.picker input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.picker input[type="color"]::-webkit-color-swatch { border: none; border-radius: 50%; }
+.picker input[type="color"]::-moz-color-swatch { border: none; border-radius: 50%; }
+
 .slider input[type="range"]:disabled { opacity: .35; cursor: default; }
 .slider input[type="range"]:disabled::-webkit-slider-thumb { box-shadow: none; }
 .slider input[type="range"]::-moz-range-track { height: 2px; background: rgba(255, 255, 255, .18); }

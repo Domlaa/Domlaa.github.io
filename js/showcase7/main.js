@@ -14,6 +14,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { splitArmorMeshes, SPLIT_DEFS } from './segment.js';
 
 const CONFIG = {
   url: '../assets/models/armor2.glb',
@@ -37,6 +38,11 @@ const state = {
   surface: 1.0,         // 装甲表面存在感：1=全彩，0=纯线稿（去饱和 + 压暗）
   lineOnly: false,
   prevSurface: 1.0,     // 仅线条恢复时用
+  lineColor: '#dbedff', // 亮线 / 流光颜色
+  flow: true,           // 线条流光
+  split: false,         // 拆解状态
+  modules: [],          // 切分出的装甲模块
+  zoomAnim: null,       // 拆/合时的相机后拉补间
   fit: { dist: 4, targetY: 1 },
   dragging: false,
 };
@@ -134,6 +140,9 @@ const edgeMat = new THREE.ShaderMaterial({
     uDetail: { value: 0.9 },
     uLight: { value: 0 },
     uSurface: { value: state.surface },
+    uLineColor: { value: new THREE.Color(state.lineColor) },
+    uTime: { value: 0 },
+    uFlow: { value: 0.9 },
     uNear: { value: camera.near },
     uFar: { value: camera.far },
   },
@@ -146,7 +155,8 @@ const edgeMat = new THREE.ShaderMaterial({
     varying vec2 vUv;
     uniform sampler2D tColor, tNormal, tDepth;
     uniform vec2 uTexel;
-    uniform float uStrength, uThickness, uNormalW, uDepthW, uNear, uFar, uLight, uLumW, uDetail, uSurface;
+    uniform float uStrength, uThickness, uNormalW, uDepthW, uNear, uFar, uLight, uLumW, uDetail, uSurface, uTime, uFlow;
+    uniform vec3 uLineColor;
 
     float linDepth(vec2 uv) {
       float z = texture2D(tDepth, uv).x;
@@ -196,10 +206,15 @@ const edgeMat = new THREE.ShaderMaterial({
 
       // 表面压暗后暗线会不可见：表面越暗，线条自动越亮
       float lineLight = clamp(uLight + 1.0 - smoothstep(0.0, 0.55, uSurface), 0.0, 1.0);
+
+      // 流光脉冲：一道亮带沿屏幕自下而上扫过（纯线稿模式下同样有效）
+      float fy = fract(vUv.y * 1.35 - uTime * 0.22);
+      float pulse = smoothstep(0.0, 0.16, fy) * smoothstep(0.34, 0.16, fy) * uFlow;
+
       vec3 ink = vec3(0.012, 0.017, 0.024);
-      vec3 glow = vec3(0.86, 0.93, 1.0);
-      vec3 lineCol = mix(ink, glow, lineLight);
-      col = mix(col, lineCol, edge * mix(0.92, 0.5, lineLight));
+      vec3 lineCol = mix(ink, uLineColor, lineLight);
+      lineCol = mix(lineCol, uLineColor * (1.18 + 0.95 * pulse), pulse);
+      col = mix(col, lineCol, edge * mix(0.92, 0.5, lineLight) * (1.0 + pulse * 0.3));
 
       gl_FragColor = vec4(col, 1.0);
       #include <colorspace_fragment>
@@ -277,20 +292,6 @@ function dress(root) {
   });
 }
 
-/** 归一化：缩放 / 居中 / 贴地 —— 换任何单位的模型都不会跑飞 */
-function normalize(root) {
-  const box = new THREE.Box3();
-  root.traverse((o) => { if (o.isMesh && o.visible) box.expandByObject(o); });
-  const size = box.getSize(new THREE.Vector3());
-  const center = box.getCenter(new THREE.Vector3());
-  const s = CONFIG.targetHeight / size.y;
-  root.scale.setScalar(s);
-  root.position.set(-center.x * s, -box.min.y * s, -center.z * s);
-  root.updateMatrixWorld(true);
-  box.setFromObject(root);
-  return box;
-}
-
 /** 取景：把模型放在「去掉顶栏 / 底部工具栏」后的可视区里垂直居中 */
 function frameCamera(height) {
   const vFov = THREE.MathUtils.degToRad(CONFIG.fov);
@@ -311,11 +312,14 @@ function frameCamera(height) {
   controls.maxDistance = d * 2.6;
 }
 
+/** 拆解状态下的视线高度：爆炸图整体上移，视点跟着抬到 0.64H */
+const splitTargetY = () => CONFIG.targetHeight * 0.64;
+
 function resetView() {
   if (!model) return;
-  const d = state.fit.dist;
+  const d = state.fit.dist * (state.split ? 1.45 : 1);
   const dir = new THREE.Vector3(0.26, 0.1, 1).normalize();
-  controls.target.set(0, state.fit.targetY, 0);
+  controls.target.set(0, state.split ? splitTargetY() : state.fit.targetY, 0);
   camera.position.copy(controls.target).addScaledVector(dir, d);
   camera.updateProjectionMatrix();
   controls.update();
@@ -369,13 +373,39 @@ async function boot() {
     });
     state.tris = Math.round(tris);
 
-    root.updateMatrixWorld(true);
-    const box = normalize(root);
-    scene.add(root);
-    model = root;
+    root.updateMatrixWorld(true);   // 骨骼静止姿态需要 matrixWorld
 
-    const b = box.getSize(new THREE.Vector3());
-    frameCamera(b.y);
+    // 单块蒙皮网格 → 烘焙蒙皮 → 归一化 → 按空间位置切成 9 个模块
+    const armorMeshes = [];
+    root.traverse((o) => { if (o.isMesh && o.visible) armorMeshes.push(o); });
+    const pieces = splitArmorMeshes(armorMeshes, CONFIG.targetHeight);
+
+    const group = new THREE.Group();
+    state.modules = [];
+    for (const [region, piece] of pieces) {
+      const def = SPLIT_DEFS[region] || { offset: [0, 0, 0], rotate: [0, 0, 0], stagger: 0 };
+      const pivot = new THREE.Group();
+      pivot.position.copy(piece.center);
+      pivot.userData.moduleId = region;
+      const mesh = new THREE.Mesh(piece.geometry, piece.material);
+      mesh.userData.moduleId = region;
+      pivot.add(mesh);
+      group.add(pivot);
+      state.modules.push({
+        id: region,
+        pivot,
+        base: piece.center.clone(),
+        off: new THREE.Vector3(...def.offset).multiplyScalar(CONFIG.targetHeight),
+        rot: new THREE.Vector3(...def.rotate),
+        stagger: def.stagger,
+        t: 0,
+        anim: null,
+      });
+    }
+    scene.add(group);
+    model = group;
+
+    frameCamera(CONFIG.targetHeight);
     resetView();
 
     $('st-tris').textContent = state.tris.toLocaleString('en-US');
@@ -430,12 +460,44 @@ function tick() {
   last = now;
 
   if (state.auto && !state.dragging && model) model.rotation.y += dt * 0.14;
+
+  // 拆/合时的相机后拉（拆开后整体变大，需要让出取景空间）
+  const nowMs = performance.now();
+  if (state.zoomAnim) {
+    const z = state.zoomAnim;
+    let k = (nowMs - z.t0) / z.dur;
+    if (k >= 1) { k = 1; state.zoomAnim = null; }
+    const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+    const d = z.fromD + (z.toD - z.fromD) * e;
+    const dir = camera.position.clone().sub(controls.target);
+    controls.target.y = z.fromY + (z.toY - z.fromY) * e;
+    if (dir.lengthSq() > 1e-6) {
+      camera.position.copy(controls.target).addScaledVector(dir.normalize(), d);
+    }
+  }
   controls.update();
+
+  // 拆解 / 组装补间（位移恒基于 base，反复拆装无累积误差）
+  for (const m of state.modules) {
+    const a = m.anim;
+    if (!a) continue;
+    let k = (nowMs - a.t0) / a.dur;
+    if (k <= 0) k = 0;
+    else if (k >= 1) { k = 1; m.anim = null; }
+    const e = a.ease === 'out'
+      ? 1 - Math.pow(1 - k, 3)
+      : (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
+    m.t = a.from + (a.to - a.from) * e;
+    m.pivot.position.copy(m.base).addScaledVector(m.off, m.t);
+    m.pivot.rotation.set(m.rot.x * m.t, m.rot.y * m.t, m.rot.z * m.t);
+  }
 
   edgeMat.uniforms.uStrength.value = state.showLine ? state.strength : 0;
   edgeMat.uniforms.uThickness.value = state.width;
   edgeMat.uniforms.uLight.value = state.invert ? 1 : 0;
   edgeMat.uniforms.uSurface.value = state.surface;
+  edgeMat.uniforms.uTime.value += dt;
+  edgeMat.uniforms.uFlow.value = state.flow ? 0.9 : 0;
 
   renderFrame();
 
@@ -522,6 +584,36 @@ function capture() {
   a.click();
 }
 
+/** 拆解 / 合并：每个模块带 stagger 时序差，重复触发从当前进度平滑过渡 */
+function toggleSplit() {
+  if (!state.modules.length) return;
+  state.split = !state.split;
+  const target = state.split ? 1 : 0;
+  const now = performance.now();
+  for (const m of state.modules) {
+    m.anim = {
+      from: m.t,
+      to: target,
+      t0: now + m.stagger * (state.split ? 1000 : 600),
+      dur: 1300 * (0.75 + 0.5 * Math.abs(target - m.t)),
+      ease: state.split ? 'out' : 'inout',
+    };
+  }
+  const b = $('btn-split');
+  b.textContent = state.split ? '合并' : '拆卸';
+  b.classList.toggle('on', state.split);
+
+  // 相机后拉 + 视点上移 / 复位
+  state.zoomAnim = {
+    fromD: camera.position.distanceTo(controls.target),
+    toD: state.fit.dist * (state.split ? 1.45 : 1),
+    fromY: controls.target.y,
+    toY: state.split ? splitTargetY() : state.fit.targetY,
+    t0: now,
+    dur: 1100,
+  };
+}
+
 function initUI() {
   $('btn-rotate').addEventListener('click', () => {
     state.auto = !state.auto;
@@ -542,6 +634,15 @@ function initUI() {
   });
   $('btn-lineonly').addEventListener('click', () => setLineOnly(!state.lineOnly));
   $('btn-invert').addEventListener('click', () => setInvert(!state.invert));
+  $('btn-split').addEventListener('click', toggleSplit);
+  $('btn-flow').addEventListener('click', () => {
+    state.flow = !state.flow;
+    $('btn-flow').classList.toggle('on', state.flow);
+  });
+  $('in-color').addEventListener('input', (e) => {
+    state.lineColor = e.target.value;
+    edgeMat.uniforms.uLineColor.value.set(state.lineColor);
+  });
   $('btn-reset').addEventListener('click', resetView);
   $('btn-shot').addEventListener('click', capture);
   $('btn-full').addEventListener('click', () => {
@@ -561,6 +662,8 @@ function initUI() {
     else if (k === 's') capture();
     else if (k === 'l') setInvert(!state.invert);
     else if (k === 'o') $('btn-lineonly').click();
+    else if (k === 'e') toggleSplit();
+    else if (k === 'g') $('btn-flow').click();
     else if (k === 'f') $('btn-full').click();
   });
 
