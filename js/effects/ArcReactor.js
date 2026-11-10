@@ -1,34 +1,75 @@
 /**
- * ArcReactor.js — 程序化能量核心
+ * ArcReactor.js — procedural energy core
  *
- * 由于 GLB 模型是单网格（无独立核心部件），弧光反应堆由几何体 + 辉光 Sprite 程序化生成，
- * 作为一个独立模块挂载到 ArmorModel 的模块管理体系（可选中、可拆解、可显隐）。
+ * The GLB is a single mesh (no separate core part), so the arc reactor is generated
+ * from primitives + a glow sprite and registered as its own module in ArmorModel
+ * (selectable / explodeable / hideable).
  */
 import * as THREE from 'three';
 
 export class ArcReactor {
   /**
-   * @param {THREE.Vector3} position 模型坐标中的安装位置（胸甲前方）
+   * Locate the reactor bay on the chest geometry.
+   *
+   * The Hulk Buster chest is not symmetric and the reactor sits on a raised plate
+   * near the sternum, so a fixed ratio of the chest bounding box drifts off target.
+   * Instead: scan the chest vertices band by band, take the band whose front surface
+   * protrudes most (that plate), then average x of the vertices sitting on that front
+   * surface — the model's own mid-line is slightly off x = 0.
+   *
+   * @param {THREE.BufferGeometry} geometry chest geometry (model space, y from the feet)
+   * @param {number} height total model height, used for absolute tolerances
+   * @returns {THREE.Vector3} mount point in model space
+   */
+  static mountPoint(geometry, height) {
+    const pos = geometry.getAttribute('position');
+    if (!geometry.boundingBox) geometry.computeBoundingBox();
+    const bb = geometry.boundingBox;
+
+    const bandY = height * 0.014;
+    const steps = 64;
+    let bestY = bb.min.y, bestZ = -Infinity;
+
+    for (let k = 0; k <= steps; k++) {
+      const y0 = bb.min.y + (bb.max.y - bb.min.y) * (k / steps);
+      let mz = -Infinity;
+      for (let i = 0; i < pos.count; i++) {
+        if (Math.abs(pos.getY(i) - y0) > bandY) continue;
+        const z = pos.getZ(i);
+        if (z > mz) mz = z;
+      }
+      if (mz > bestZ) { bestZ = mz; bestY = y0; }
+    }
+
+    // 取该高度带里贴近前表面的顶点求 x 中心（护板本身）
+    const zCut = bestZ - height * 0.022;
+    let sx = 0, n = 0;
+    for (let i = 0; i < pos.count; i++) {
+      if (Math.abs(pos.getY(i) - bestY) > bandY * 1.8) continue;
+      if (pos.getZ(i) < zCut) continue;
+      sx += pos.getX(i); n++;
+    }
+
+    return new THREE.Vector3(n ? sx / n : 0, bestY, bestZ + height * 0.004);
+  }
+
+  /**
+   * @param {THREE.Vector3} position mount point in model space (front of the chest)
    */
   constructor(position) {
-    const def = {
-      id: 'reactor',
-      name: 'ARC REACTOR',
-      cn: '能量核心',
-    };
     this.material = null;
     this.def = {
       id: 'reactor',
       region: null,
       name: 'ARC REACTOR',
-      cn: '能量核心',
-      desc: '钯基弧光反应堆，输出功率 3.42 GJ/s，为全身装甲供能。运行时产生特征性青蓝色辉光。',
+      sub: 'energy core',
+      desc: 'Palladium arc reactor rated 3.42 GJ/s, feeding the whole suit. Emits a characteristic cyan glow while running.',
       stats: [
-        ['输出功率', '3.42 GJ/s', 0.97],
-        ['核心温度', '2400 K', 0.72],
-        ['燃料余量', '99.2%', 0.99],
+        ['OUTPUT', '3.42 GJ/s', 0.97],
+        ['CORE TEMP', '2400 K', 0.72],
+        ['FUEL', '99.2%', 0.99],
       ],
-      explode: [0, 0.04, 0.46],
+      explode: [0, 0.02, 0.30],   // stay on the chest plate when exploded
       rotate: [0, 0, 0],
       stagger: 0.42,
       procedural: true,
@@ -36,7 +77,7 @@ export class ArcReactor {
 
     const group = new THREE.Group();
 
-    // 主体圆盘（自发光青白）
+    // main disc (self-lit cyan-white)
     const discMat = new THREE.MeshBasicMaterial({
       color: 0xd9faff,
       transparent: true,
@@ -48,7 +89,18 @@ export class ArcReactor {
     const disc = new THREE.Mesh(new THREE.CircleGeometry(0.045, 40), discMat);
     group.add(disc);
 
-    // 三角形内环（标记环）
+    // 高亮核心（叠加在圆盘中心，避免整块看起来像一枚灰白硬币）
+    const core = new THREE.Mesh(
+      new THREE.CircleGeometry(0.022, 32),
+      new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0.9,
+        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+      }),
+    );
+    core.position.z = 0.002;
+    group.add(core);
+
+    // inner marking ring
     const ringMat = new THREE.MeshBasicMaterial({
       color: 0x8ef2ff,
       transparent: true,
@@ -60,19 +112,19 @@ export class ArcReactor {
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.052, 0.062, 10, 1), ringMat);
     group.add(ring);
 
-    // 外圈光环
+    // outer halo ring
     const haloMat = new THREE.MeshBasicMaterial({
       color: 0x35d5ff,
       transparent: true,
-      opacity: 0.5,
+      opacity: 0.42,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       side: THREE.DoubleSide,
     });
-    const halo = new THREE.Mesh(new THREE.RingGeometry(0.068, 0.085, 40), haloMat);
+    const halo = new THREE.Mesh(new THREE.RingGeometry(0.062, 0.076, 40), haloMat);
     group.add(halo);
 
-    // 辉光 Sprite
+    // glow sprite
     const glowTex = makeGlowTexture();
     const glowMat = new THREE.SpriteMaterial({
       map: glowTex,
@@ -86,13 +138,13 @@ export class ArcReactor {
     this.glow.scale.setScalar(0.2);
     group.add(this.glow);
 
-    // 光源（照亮周围，主要产生氛围）
+    // point light: warm-up glow around the core
     this.light = new THREE.PointLight(0x55dcff, 2.2, 1.6, 2);
     group.add(this.light);
 
     group.position.copy(position);
 
-    // 挂载结构与 ArmorModel 的模块约定一致：pivot 在锚点，内容反向偏移
+    // follow the ArmorModel module convention: pivot sits on the anchor, content offset under it
     const pivot = new THREE.Group();
     pivot.position.copy(position);
     group.position.set(0, 0, 0);
@@ -112,22 +164,22 @@ export class ArcReactor {
     this.selectT = 0;
     this.tris = 120;
 
-    // 拾取辅助：给一个稍大的透明拾取面（位于 pivot 局部原点）
+    // picking helper: a slightly larger invisible disc at the pivot origin
     const pickMat = new THREE.MeshBasicMaterial({ visible: false });
     this.pickMesh = new THREE.Mesh(new THREE.CircleGeometry(0.1, 12), pickMat);
     pivot.add(this.pickMesh);
   }
 
-  /** 每帧脉动 */
+  /** per-frame pulse */
   update(dt, time) {
     const pulse = 0.75 + 0.25 * Math.sin(time * 2.6);
     const burst = Math.pow(0.5 + 0.5 * Math.sin(time * 0.9), 8) * 0.6; // 周期性爆发
-    const glowScale = 0.13 + 0.04 * pulse + burst * 0.08;
+    const glowScale = 0.095 + 0.028 * pulse + burst * 0.05;
     this.glow.scale.setScalar(glowScale);
-    this.glow.material.opacity = 0.42 + 0.22 * pulse;
+    this.glow.material.opacity = 0.34 + 0.16 * pulse;
     this.light.intensity = 0.30 + 0.20 * pulse + 0.7 * burst;
 
-    // 选中时外环旋转
+    // outer rings spin faster while selected
     this.pivot.children.forEach((c) => {
       if (c.geometry && c.geometry.type === 'RingGeometry') c.rotation.z += dt * (this.selectT > 0.5 ? 2.0 : 0.4);
     });
@@ -141,7 +193,7 @@ export class ArcReactor {
   }
 }
 
-/** 径向渐变辉光贴图 */
+/** radial-gradient glow texture */
 function makeGlowTexture() {
   const size = 128;
   const canvas = document.createElement('canvas');

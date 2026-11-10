@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>MARK XLIV · HULK BUSTER · 全息拆解系统</title>
-<meta name="description" content="Web 3D 全息拆解系统 — HULK BUSTER 线条渲染 / 流光扫描 / 模块化装甲拆解">
+<title>MARK XLIV · HULK BUSTER · HOLOGRAPHIC DECOMPOSITION</title>
+<meta name="description" content="Web 3D holographic deconstruction system — HULK BUSTER edge-line projection, flow scan and modular armor teardown">
 <link rel="stylesheet" href="./css/hud.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%237de8ff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23d9faff'/%3E%3C/svg%3E">
 <script type="importmap">
@@ -16,8 +16,9 @@
 }
 </script>
 
-<!-- 启动诊断：模块解析失败（典型是浏览器缓存了旧 JS，import 到已删除的文件）时，
-     浏览器只会把错误写进 Console，启动画面会静默卡死。这里把原因显示到页面上。 -->
+<!-- Boot diagnostics: when a module fails to resolve (typically the browser cached an
+     older JS that imports a deleted file) the error only lands in the console and the
+     boot screen hangs silently. Surface the reason on the page instead. -->
 <script>
 (function () {
   var shown = false;
@@ -32,26 +33,26 @@
     if (btn) btn.classList.remove('hidden');
   }
   window.__BOOT_DIAG = diag;
-  // 捕获阶段监听：模块脚本 404 / MIME 错误只会触发资源 error 事件，没有 message
+  // Listen in the capture phase: a failed module script only fires a resource error, no message
   window.addEventListener('error', function (e) {
     var t = e && e.target;
     if (t && t !== window && (t.src || t.href)) {
-      diag('资源加载失败\n' + (t.src || t.href) + '\n通常是模块 404 或浏览器缓存了旧版 JS，点下方「强制重载」。');
+      diag('RESOURCE LOAD FAILED\n' + (t.src || t.href) + '\nUsually a missing module or a stale cached bundle. Use FORCE RELOAD below.');
       return;
     }
-    diag((e && e.message) || '脚本错误（详见 Console）');
+    diag((e && e.message) || 'SCRIPT ERROR — see console');
   }, true);
   window.addEventListener('unhandledrejection', function (e) {
     var r = e && e.reason;
-    diag('未处理的 Promise 拒绝：' + ((r && (r.message || r)) || '未知'));
+    diag('UNHANDLED REJECTION: ' + ((r && (r.message || r)) || 'unknown'));
   });
-  // 兜底：主模块若完全没执行（旧缓存导致模块图断裂），20 秒后提示原因
+  // Fallback: if the entry module never ran (broken module graph), say so after 20s
   setTimeout(function () {
     if (window.__BOOT_READY) return;
     var stage = window.__BOOT_STAGE;
     diag(stage
-      ? '启动超时 20s：卡在「' + stage + '」阶段 → 详见 Console'
-      : '启动超时 20s：模块未执行，通常是浏览器缓存了旧版 JS → 点下方强制重载');
+      ? 'BOOT TIMEOUT 20s — stalled at "' + stage + '" (see console)'
+      : 'BOOT TIMEOUT 20s — entry module never ran, likely a stale JS cache. Use FORCE RELOAD.');
   }, 20000);
 })();
 </script>
@@ -59,15 +60,15 @@
 <body>
   <canvas id="stage"></canvas>
 
-  <!-- 全屏特效层（CSS 实现，不参与 3D） -->
+  <!-- Fullscreen CSS effects (not part of the 3D layer) -->
   <div class="fx-scanlines" aria-hidden="true"></div>
   <div class="fx-vignette" aria-hidden="true"></div>
   <div class="fx-grain" aria-hidden="true"></div>
 
-  <!-- HUD 指示线画布 -->
+  <!-- HUD leader-line canvas -->
   <svg id="leader-lines" aria-hidden="true"></svg>
 
-  <!-- HUD 界面 -->
+  <!-- HUD -->
   <div id="hud" class="hud hidden">
 
     <header class="topbar">
@@ -85,12 +86,12 @@
 
     <aside class="rail left">
       <section class="panel">
-        <div class="p-head"><b>01</b><span>MODULES</span><em>装甲模块</em></div>
+        <div class="p-head"><b>01</b><span>MODULES</span><em>armor units</em></div>
         <ul id="module-list" class="module-list"></ul>
       </section>
 
       <section class="panel">
-        <div class="p-head"><b>02</b><span>SYSTEM</span><em>系统</em></div>
+        <div class="p-head"><b>02</b><span>SYSTEM</span><em>telemetry</em></div>
         <div class="kv"><span>UNIT</span><b id="sys-unit">MARK XLIV</b></div>
         <div class="kv"><span>STATE</span><b class="ok" id="sys-state">STANDBY</b></div>
         <div class="kv"><span>PROJECTION</span><b id="sys-render">EDGE LINE</b></div>
@@ -99,11 +100,11 @@
       </section>
 
       <section class="panel views">
-        <div class="p-head"><b>03</b><span>VIEWS</span><em>其他视点</em></div>
-        <a href="./mk85.html"><i>01</i>MK85 · 实景模型</a>
-        <a href="./mk7.html"><i>02</i>MK7 · 线稿渲染</a>
-        <a href="./mk7-console.html"><i>03</i>MK7 · 贾维斯控制台</a>
-        <a href="./ironman-hud.html"><i>04</i>MK7 · 全息诊断</a>
+        <div class="p-head"><b>03</b><span>VIEWS</span><em>other rigs</em></div>
+        <a href="./mk85.html"><i>01</i>MK85 · LIVE RENDER</a>
+        <a href="./mk7.html"><i>02</i>MK7 · EDGE LINE</a>
+        <a href="./mk7-console.html"><i>03</i>MK7 · JARVIS CONSOLE</a>
+        <a href="./ironman-hud.html"><i>04</i>MK7 · DIAGNOSTICS</a>
       </section>
     </aside>
 
@@ -135,14 +136,14 @@
 
     <aside class="rail right">
       <section class="panel grow">
-        <div class="p-head"><b>04</b><span>TARGET INFO</span><em>部件信息</em></div>
+        <div class="p-head"><b>04</b><span>TARGET INFO</span><em>component data</em></div>
         <div id="info-body" class="info-body">
-          <p class="info-hint">点击任意装甲模块<br>查看详细技术参数</p>
+          <p class="info-hint">SELECT ANY ARMOR UNIT<br>TO READ ITS SPECIFICATION</p>
         </div>
       </section>
 
       <section class="panel">
-        <div class="p-head"><b>05</b><span>PROJECTION</span><em>线条参数</em></div>
+        <div class="p-head"><b>05</b><span>PROJECTION</span><em>line parameters</em></div>
         <div class="kv"><span>LINES</span><b id="p-lines">ON</b></div>
         <div class="kv"><span>STRENGTH</span><b id="p-strength">0.95</b></div>
         <div class="kv"><span>WIDTH</span><b id="p-width">1.10</b></div>
@@ -151,7 +152,7 @@
       </section>
 
       <section class="panel">
-        <div class="p-head"><b>06</b><span>POWER</span><em>能量核心</em></div>
+        <div class="p-head"><b>06</b><span>POWER</span><em>arc reactor</em></div>
         <div class="power-row">
           <div class="reactor-ring"><i></i></div>
           <div class="power-data">
@@ -165,24 +166,28 @@
       </section>
     </aside>
 
-    <footer class="dock">
-      <button class="btn primary" id="btn-explode">拆解 EXPLODE</button>
-      <button class="btn" id="btn-assemble">组装 ASSEMBLE</button>
+    <footer class="dock" id="dock">
+      <button class="btn primary" id="btn-explode">EXPLODE</button>
+      <button class="btn" id="btn-assemble">ASSEMBLE</button>
       <i class="sep"></i>
-      <button class="btn toggle on" id="btn-lines">线条 LINES</button>
-      <button class="btn toggle on" id="btn-flow">流光 FLOW</button>
+      <button class="btn toggle on" id="btn-lines">LINES</button>
+      <button class="btn toggle on" id="btn-flow">FLOW</button>
       <i class="sep"></i>
-      <label class="slider">线条<input type="range" id="rng-line" min="20" max="100" value="95"></label>
-      <label class="slider">线宽<input type="range" id="rng-width" min="60" max="200" value="110"></label>
-      <label class="slider">流速<input type="range" id="rng-flow" min="0" max="100" value="40"></label>
-      <label class="slider">自转<input type="range" id="rng-spin" min="0" max="100" value="30"></label>
+      <label class="slider">LINES<input type="range" id="rng-line" min="20" max="100" value="95"></label>
+      <label class="slider">WIDTH<input type="range" id="rng-width" min="60" max="200" value="110"></label>
+      <label class="slider">SPEED<input type="range" id="rng-flow" min="0" max="100" value="40"></label>
+      <label class="slider">SPIN<input type="range" id="rng-spin" min="0" max="100" value="30"></label>
       <i class="sep"></i>
-      <button class="btn" id="btn-pause">暂停 PAUSE</button>
-      <button class="btn" id="btn-reset">复位 RESET</button>
+      <button class="btn" id="btn-pause">PAUSE</button>
+      <button class="btn" id="btn-reset">RESET</button>
+      <i class="sep"></i>
+      <button class="btn ghost" id="btn-dock" title="Collapse the control dock">HIDE DOCK</button>
     </footer>
+
+    <button class="dock-tab" id="dock-tab" title="Show the control dock">CONTROLS</button>
   </div>
 
-  <!-- 启动画面 -->
+  <!-- Boot screen -->
   <div id="boot" class="boot">
     <div class="boot-inner">
       <div class="boot-title">STARK INDUSTRIES</div>
@@ -191,13 +196,13 @@
       <div class="boot-log" id="boot-log">INITIALIZING…</div>
       <div class="boot-diag" id="boot-diag"></div>
       <button class="boot-retry hidden" id="boot-retry"
-              onclick="location.replace(location.pathname + '?r=' + Date.now())">强制重载 FORCE RELOAD</button>
+              onclick="location.replace(location.pathname + '?r=' + Date.now())">FORCE RELOAD</button>
     </div>
   </div>
   <div id="webgl-error" class="boot hidden">
     <div class="boot-inner">
       <div class="boot-title">RENDERER OFFLINE</div>
-      <div class="boot-sub">当前浏览器不支持 WebGL2，无法启动全息投影系统</div>
+      <div class="boot-sub">THIS BROWSER DOES NOT SUPPORT WEBGL2 — HOLOGRAPHIC PROJECTION UNAVAILABLE</div>
     </div>
   </div>
 

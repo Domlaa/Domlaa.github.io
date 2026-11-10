@@ -254,7 +254,31 @@ body {
   backdrop-filter: blur(12px);
   box-shadow: 0 -6px 30px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(180, 240, 255, .06);
   pointer-events: auto;
+  max-height: 96px; overflow: hidden;
+  transition: max-height .42s cubic-bezier(.4, 0, .2, 1), opacity .28s ease,
+              padding .42s cubic-bezier(.4, 0, .2, 1), transform .42s cubic-bezier(.4, 0, .2, 1),
+              border-width .42s;
 }
+/* 收起控制坞：网格行高由 auto 跟随 max-height，舞台自然向上扩展 */
+.hud.dock-hidden .dock {
+  max-height: 0; padding-top: 0; padding-bottom: 0; border-width: 0;
+  opacity: 0; transform: translateY(10px); pointer-events: none;
+}
+/* 收起后底部留一个小拉手 */
+.dock-tab {
+  position: fixed; left: 50%; bottom: 0; z-index: 6;
+  transform: translateX(-50%);
+  padding: 5px 20px 6px;
+  font-family: var(--mono); font-size: 9px; letter-spacing: .28em;
+  color: var(--cyan-bright); background: rgba(6, 18, 27, .84);
+  border: 1px solid var(--line); border-bottom: 0; border-radius: 4px 4px 0 0;
+  backdrop-filter: blur(10px); cursor: pointer;
+  opacity: 0; pointer-events: none; transition: opacity .3s ease, box-shadow .2s, background .2s;
+}
+.hud.dock-hidden .dock-tab { opacity: 1; pointer-events: auto; }
+.dock-tab:hover { background: rgba(10, 30, 44, .95); box-shadow: 0 -4px 18px rgba(125, 232, 255, .22); }
+.btn.ghost { background: transparent; border-color: rgba(125, 232, 255, .22); color: rgba(150, 185, 200, .95); }
+.btn.ghost:hover { color: var(--cyan-bright); border-color: rgba(125, 232, 255, .5); }
 .btn {
   font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
   color: var(--txt); background: rgba(125, 232, 255, .05);

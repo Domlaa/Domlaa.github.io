@@ -51,13 +51,12 @@ async function boot() {
 
   log('SEGMENTING MODULES…', 0.9);
 
-  // 弧光反应堆：安装到胸甲前方（依据胸甲包围盒计算安装位）
+  // Arc reactor: mount point is derived from the chest geometry itself (the Hulk Buster
+  // chest is asymmetric and the bay sits on a raised plate, so a fixed bbox ratio drifts off)
   const chest = armor.modules.get('chest');
   if (chest) {
-    const bb = chest.mesh.geometry.boundingBox;
-    const y = bb.min.y + (bb.max.y - bb.min.y) * 0.72;
-    const z = bb.max.z + (armor.height * 0.012);
-    const reactor = new ArcReactor(new THREE.Vector3(0, y, z));
+    const mount = ArcReactor.mountPoint(chest.mesh.geometry, armor.height);
+    const reactor = new ArcReactor(mount);
     reactor.pivot.scale.setScalar(armor.height / 2.6);
     armor.attachProceduralModule(reactor);
     armor._reactor = reactor;
@@ -100,6 +99,17 @@ async function boot() {
       if (paused) tweens.pause(); else tweens.resume();
     },
     onReset: () => sceneManager.resetView(tweens),
+    // Dock collapse: the stage grid row grows, so re-fit the camera once the transition ends
+    onDockToggle: () => {
+      setTimeout(() => {
+        sceneManager.frame(armor.box);
+        sceneManager.zoom(1.0, tweens, 0.7);
+        sceneManager.edge.setBand(
+          sceneManager._stageRect().left / window.innerWidth,
+          (sceneManager._stageRect().left + sceneManager._stageRect().width) / window.innerWidth,
+        );
+      }, 440);
+    },
   });
   hud.show();
 

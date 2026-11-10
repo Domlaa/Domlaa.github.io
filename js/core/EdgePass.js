@@ -92,18 +92,24 @@ const QUAD_FRAG = /* glsl */`
     // 表面压暗后暗线会不可见：表面越暗，线条自动越亮
     float lineLight = 1.0 - smoothstep(0.0, 0.55, uSurface);
 
-    // ---------- 流光：窄亮核 + 长拖尾（垂直上行） ----------
-    float fy = fract(vUv.y * 1.35 - uTime * uFlowSpeed);
-    float head = smoothstep(0.055, 0.010, fy);
-    float tail = pow(max(1.0 - fy * 2.35, 0.0), 2.2) * 0.46;
-    float pulse = clamp(head + tail * (1.0 - head * 0.55), 0.0, 1.0) * uFlow;
+    // ---------- 流光：柔和渐变的扫描带 ----------
+    // fy = 0 是扫描头；沿 +y 上行时，已扫过的一侧落在 fy→1。
+    // 「前沿高斯 + 向下长指数拖尾」取 max：两者在 fy=0 / fy=1 处数值接近，
+    // 衔接连续不会出现硬边；再用 smoothstep 做一次 S 形柔化。
+    float fy = fract(vUv.y - uTime * uFlowSpeed);   // 1.0 = one band per screen height
+    float head = exp(-pow(fy * 14.0, 2.0));        // leading core (fast falloff upward)
+    float trail = exp(-(1.0 - fy) * 7.0);          // long trail below (already swept)
+    float band = smoothstep(0.02, 1.0, max(head, trail));
+    float pulse = clamp(band, 0.0, 1.0) * uFlow;
 
     vec3 ink = vec3(0.012, 0.017, 0.024);
-    float baseDim = mix(1.0, 0.74, clamp(uFlow, 0.0, 1.0));
+    float baseDim = mix(1.0, 0.78, clamp(uFlow, 0.0, 1.0));
     vec3 lineCol = mix(ink, uLineColor * baseDim, lineLight);
-    vec3 pulseCol = uLineColor * (1.30 + 0.75 * pulse);
+    vec3 pulseCol = uLineColor * (1.06 + 0.82 * pulse);
     lineCol = mix(lineCol, pulseCol, pulse);
-    col = mix(col, lineCol, edge * mix(0.94, 0.55, lineLight) * (1.0 + pulse * 0.4));
+    col = mix(col, lineCol, edge * mix(0.94, 0.55, lineLight) * (1.0 + pulse * 0.12));
+    // 扫描带在装甲表面留一层极淡辉光，让明暗过渡更柔（仅装甲本体）
+    col += uLineColor * pulse * 0.075 * armorMask;
 
     // ---------- 数字化构建擦除（自下而上） ----------
     // uWipe = 1 时完全显现；< 1 时前沿以上被擦掉，前沿留一条亮线

@@ -60,8 +60,8 @@ export class HUD {
       li.innerHTML = `
         <span class="dot"></span>
         <span class="name">${def.name}</span>
-        <span class="cn-name">${def.cn}</span>
-        <span class="eye" title="显示 / 隐藏">◉</span>
+        <span class="cn-name">${def.sub || ''}</span>
+        <span class="eye" title="toggle visibility">◉</span>
       `;
       li.addEventListener('click', (e) => {
         if (e.target.classList.contains('eye')) return;
@@ -104,7 +104,7 @@ export class HUD {
       dot.setAttribute('r', '2.4');
       const label = document.createElementNS(NS, 'text');
       label.setAttribute('class', 'lead-label');
-      label.textContent = def.cn;
+      label.textContent = def.name;
       this.el.svg.appendChild(path);
       this.el.svg.appendChild(dot);
       this.el.svg.appendChild(label);
@@ -178,7 +178,7 @@ export class HUD {
     `).join('');
     this.el.infoBody.innerHTML = `
       <div class="info-name">${def.name}</div>
-      <div class="info-cn">■ ${def.cn}</div>
+      <div class="info-cn">■ ${def.sub || ''}</div>
       <p class="info-desc">${def.desc || ''}</p>
       <div class="info-stats">${stats}</div>
       <div class="info-status"><span class="ok-dot"></span>STATUS · NOMINAL</div>
@@ -191,7 +191,7 @@ export class HUD {
     const online = all.filter((m) => m.visible).length;
     const tris = all.reduce((s, m) => s + (m.tris || 0), 0);
     return `
-      <p class="info-hint">点击任意装甲模块<br>查看详细技术参数</p>
+      <p class="info-hint">SELECT ANY ARMOR UNIT<br>TO READ ITS SPECIFICATION</p>
       <div class="info-ov">
         <div class="kv"><span>PROJECTION</span><b>EDGE LINE</b></div>
         <div class="kv"><span>FLOW</span><b>VERTICAL PULSE</b></div>
@@ -224,12 +224,33 @@ export class HUD {
     $('rng-spin').addEventListener('input', (e) => a.onSpin(e.target.value / 100));
 
     $('btn-pause').addEventListener('click', (e) => {
-      const paused = e.currentTarget.textContent.startsWith('暂停');
-      e.currentTarget.textContent = paused ? '继续 RESUME' : '暂停 PAUSE';
+      const btn = e.currentTarget;
+      const paused = btn.dataset.state !== 'paused';
+      btn.dataset.state = paused ? 'paused' : 'running';
+      btn.textContent = paused ? 'RESUME' : 'PAUSE';
       a.onPause(paused);
     });
     $('btn-reset').addEventListener('click', () => a.onReset());
+
+    // 控制坞收起 / 展开
+    const setDock = (hidden) => {
+      this.el.hud.classList.toggle('dock-hidden', hidden);
+      const btn = $('btn-dock');
+      if (btn) btn.textContent = hidden ? 'SHOW DOCK' : 'HIDE DOCK';
+      a.onDockToggle?.(hidden);
+    };
+    $('btn-dock').addEventListener('click', () => setDock(true));
+    $('dock-tab').addEventListener('click', () => setDock(false));
+    // 快捷键 H 收起 / 展开
+    window.addEventListener('keydown', (e) => {
+      if (e.key !== 'h' && e.key !== 'H') return;
+      if (e.target instanceof HTMLInputElement) return;
+      setDock(!this.el.hud.classList.contains('dock-hidden'));
+    });
   }
+
+  /** 控制坞当前是否收起 */
+  get dockHidden() { return this.el.hud.classList.contains('dock-hidden'); }
 
   _flashState(text) {
     this.el.state.textContent = text;
