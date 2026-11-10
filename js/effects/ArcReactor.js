@@ -6,51 +6,26 @@
  * (selectable / explodeable / hideable).
  */
 import * as THREE from 'three';
+import { REACTOR_MOUNT } from '../config/armor.config.js';
 
 export class ArcReactor {
   /**
-   * Locate the reactor bay on the chest geometry.
+   * Mount point of the reactor bay in model space.
    *
-   * The Hulk Buster chest is not symmetric and the reactor sits on a raised plate
-   * near the sternum, so a fixed ratio of the chest bounding box drifts off target.
-   * Instead: scan the chest vertices band by band, take the band whose front surface
-   * protrudes most (that plate), then average x of the vertices sitting on that front
-   * surface — the model's own mid-line is slightly off x = 0.
+   * The chest of this model carries a real housing for the core: a circular recess on the
+   * sternum whose floor sits behind the surrounding plate. `REACTOR_MOUNT` holds that bay
+   * in normalized coordinates (see armor.config.js) — the model is asymmetric, so the bay
+   * is a few centimetres off x = 0 and cannot be derived from the chest bounding box.
    *
-   * @param {THREE.BufferGeometry} geometry chest geometry (model space, y from the feet)
-   * @param {number} height total model height, used for absolute tolerances
+   * @param {number} height total model height
    * @returns {THREE.Vector3} mount point in model space
    */
-  static mountPoint(geometry, height) {
-    const pos = geometry.getAttribute('position');
-    if (!geometry.boundingBox) geometry.computeBoundingBox();
-    const bb = geometry.boundingBox;
-
-    const bandY = height * 0.014;
-    const steps = 64;
-    let bestY = bb.min.y, bestZ = -Infinity;
-
-    for (let k = 0; k <= steps; k++) {
-      const y0 = bb.min.y + (bb.max.y - bb.min.y) * (k / steps);
-      let mz = -Infinity;
-      for (let i = 0; i < pos.count; i++) {
-        if (Math.abs(pos.getY(i) - y0) > bandY) continue;
-        const z = pos.getZ(i);
-        if (z > mz) mz = z;
-      }
-      if (mz > bestZ) { bestZ = mz; bestY = y0; }
-    }
-
-    // 取该高度带里贴近前表面的顶点求 x 中心（护板本身）
-    const zCut = bestZ - height * 0.022;
-    let sx = 0, n = 0;
-    for (let i = 0; i < pos.count; i++) {
-      if (Math.abs(pos.getY(i) - bestY) > bandY * 1.8) continue;
-      if (pos.getZ(i) < zCut) continue;
-      sx += pos.getX(i); n++;
-    }
-
-    return new THREE.Vector3(n ? sx / n : 0, bestY, bestZ + height * 0.004);
+  static mountPoint(height) {
+    return new THREE.Vector3(
+      REACTOR_MOUNT.x * height,
+      REACTOR_MOUNT.y * height,
+      REACTOR_MOUNT.z * height,
+    );
   }
 
   /**

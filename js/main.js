@@ -51,11 +51,12 @@ async function boot() {
 
   log('SEGMENTING MODULES…', 0.9);
 
-  // Arc reactor: mount point is derived from the chest geometry itself (the Hulk Buster
-  // chest is asymmetric and the bay sits on a raised plate, so a fixed bbox ratio drifts off)
+  // Arc reactor: the chest carries a real circular bay on the sternum; REACTOR_MOUNT
+  // holds its position in normalized coordinates (the suit is asymmetric, so it is not
+  // derivable from the chest bounding box)
   const chest = armor.modules.get('chest');
   if (chest) {
-    const mount = ArcReactor.mountPoint(chest.mesh.geometry, armor.height);
+    const mount = ArcReactor.mountPoint(armor.height);
     const reactor = new ArcReactor(mount);
     reactor.pivot.scale.setScalar(armor.height / 2.6);
     armor.attachProceduralModule(reactor);

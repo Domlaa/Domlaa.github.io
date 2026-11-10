@@ -11,6 +11,18 @@ export const MODEL_URL = './model/tiny/hulk+buster2_optimized.glb';
 export const ARMOR_NAME = 'MARK XLIV';
 export const ARMOR_SUB = 'HULK BUSTER';
 
+/**
+ * Arc reactor mount point, as ratios of the model height H.
+ *
+ * The Hulk Buster's reactor bay is a circular recess on the sternum, not a raised plate:
+ * its floor sits ~0.11 behind the chest plate and spans ~0.08 across. Measured by
+ * ray-casting the chest front surface on a 5 mm grid, then taking the centroid of the
+ * cavity floor. The model's own mid-line is not x = 0 (this suit is asymmetric), and the
+ * head/torso are normalised by their bounding box, so the bay ends up slightly off-axis.
+ * z is chosen to sit inside the recess, behind the surrounding plate.
+ */
+export const REACTOR_MOUNT = { x: -0.0155, y: 0.742, z: 0.158 };
+
 /** Spatial split thresholds (t = y/H, x left-right, z front-back, model faces +z) */
 export const SEGMENT_THRESHOLDS = {
   helmetTop: 0.885,   // above this t -> helmet
