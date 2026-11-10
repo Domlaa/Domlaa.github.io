@@ -24,6 +24,26 @@ body {
 
 #stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; z-index: 1; touch-action: none; }
 
+/* 贾维斯背景层（HALOFLUX 壁纸版 iframe）。
+   50% 尺寸 + scale(2)：内部只渲染 25% 的像素再放大显示（背景允许柔化，换 FPS）。 */
+#jarvis {
+  position: fixed; z-index: 0; border: 0; pointer-events: none;
+  width: 40%; height: 40%; left: 30%; top: 30%;
+  transform: scale(2.5); transform-origin: 50% 50%;
+  display: none; background: #050608;
+  opacity: .62; filter: saturate(.8) brightness(.9);
+}
+#jarvis.on { display: block; }
+
+/* 聚光遮罩：中心压暗给装甲让位，光环留在四周（观感上装甲「坐在」光环里） */
+#jarvisveil {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none; display: none;
+  background:
+    radial-gradient(circle at 50% 46%, rgba(6, 9, 13, .72) 0%, rgba(6, 9, 13, .46) 32%, rgba(6, 9, 13, .1) 60%, rgba(6, 9, 13, 0) 80%),
+    radial-gradient(ellipse at 50% 100%, rgba(6, 9, 13, .68) 0%, transparent 55%);
+}
+#jarvisveil.on { display: block; }
+
 .vignette {
   position: fixed; inset: 0; z-index: 2; pointer-events: none;
   background: radial-gradient(circle at 50% 44%, transparent 42%, rgba(0, 0, 0, .5) 100%);
@@ -123,6 +143,14 @@ body {
   z-index: 4; margin: 0; font-family: var(--mono); font-size: 10px;
   letter-spacing: .12em; color: rgba(255, 255, 255, .28);
 }
+.hint + .credit {
+  position: fixed; left: clamp(20px, 3.4vw, 54px); bottom: calc(clamp(20px, 3.4vh, 36px) - 18px);
+  z-index: 4; margin: 0; font-family: var(--mono); font-size: 9px;
+  letter-spacing: .1em; color: rgba(255, 255, 255, .16);
+}
+.hint + .credit a { color: rgba(255, 255, 255, .3); text-decoration: none; }
+.hint + .credit a:hover { color: rgba(255, 255, 255, .6); }
+@media (max-width: 860px) { .hint + .credit { display: none; } }
 
 /* ---------- 加载 ---------- */
 .loader {

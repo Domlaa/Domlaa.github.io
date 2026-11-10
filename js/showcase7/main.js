@@ -43,6 +43,10 @@ const state = {
   lineColor: '#dbedff', // 亮线 / 流光颜色
   flow: true,           // 线条流光
   bg: true,             // 3D 空间背景
+  jarvis: false,        // 贾维斯背景（HALOFLUX；initUI 按设备类型设定初值）
+  jarvisMusic: false,   // 贾维斯背景音乐
+  jarvisHidBg: false,   // 开贾维斯时是否替用户关掉了 3D 背景（关闭时恢复）
+  jarvisWant: !matchMedia('(pointer: coarse)').matches,  // 期望状态（触屏默认关，省电）
   time: 0,              // 全局动画时钟（流光 / 背景共用）
   split: false,         // 拆解状态
   modules: [],          // 切分出的装甲模块
@@ -57,7 +61,9 @@ const $ = (id) => document.getElementById(id);
 /* 渲染器 / 场景                                                        */
 /* ------------------------------------------------------------------ */
 const canvas = $('stage');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+// alpha 画布：合成通道可输出 RT 的 alpha（贾维斯 iframe 背景从画布下面透出来）。
+// premultipliedAlpha:false → 直通 alpha（RT 里装甲 a=1、背景 a≈0，边缘线性过渡）。
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', alpha: true, premultipliedAlpha: false });
 let DPR = Math.min(devicePixelRatio || 1, 2);
 renderer.setPixelRatio(DPR);
 renderer.setSize(innerWidth, innerHeight);
@@ -67,7 +73,9 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.shadowMap.enabled = false;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0a0e13);
+// 注意：不要用 scene.background（three 对 Color 背景会强制清 alpha=1，覆盖 clearAlpha 0）。
+// 底色由 renderFrame 里的 setClearColor(0x0a0e13, 0) 提供，alpha 留给合成通道做遮罩 / 透明输出。
+renderer.setClearColor(0x0a0e13, 0);
 
 const camera = new THREE.PerspectiveCamera(CONFIG.fov, innerWidth / innerHeight, 0.05, 60);
 const controls = new OrbitControls(camera, canvas);
@@ -327,6 +335,7 @@ const edgeMat = new THREE.ShaderMaterial({
     uLineColor: { value: new THREE.Color(state.lineColor) },
     uTime: { value: 0 },
     uFlow: { value: 0.9 },
+    uTransparent: { value: 0 },
     uNear: { value: camera.near },
     uFar: { value: camera.far },
   },
@@ -339,7 +348,7 @@ const edgeMat = new THREE.ShaderMaterial({
     varying vec2 vUv;
     uniform sampler2D tColor, tNormal, tDepth;
     uniform vec2 uTexel;
-    uniform float uStrength, uThickness, uNormalW, uDepthW, uNear, uFar, uLight, uLumW, uDetail, uSurface, uTime, uFlow;
+    uniform float uStrength, uThickness, uNormalW, uDepthW, uNear, uFar, uLight, uLumW, uDetail, uSurface, uTime, uFlow, uTransparent;
     uniform vec3 uLineColor;
 
     float linDepth(vec2 uv) {
@@ -407,7 +416,10 @@ const edgeMat = new THREE.ShaderMaterial({
       lineCol = mix(lineCol, pulseCol, pulse);
       col = mix(col, lineCol, edge * mix(0.92, 0.5, lineLight) * (1.0 + pulse * 0.55));
 
-      gl_FragColor = vec4(col, 1.0);
+      // 输出 alpha：贾维斯模式透传 RT alpha（装甲 1 / 背景 0，iframe 从画布下面透出），
+      // 普通模式恒为 1（不透明，保持程序化 3D 背景的观感）。mask 即 tColor.a。
+      float outA = mix(1.0, mask, uTransparent);
+      gl_FragColor = vec4(col, outA);
       #include <colorspace_fragment>
     }
   `,
@@ -612,6 +624,8 @@ async function boot() {
 
     state.ready = true;
     console.info('[MK7] meshes:', meshes, 'tris:', state.tris, 'load ms:', ms);
+    // 模型就绪后再拉贾维斯背景（38MB 模型优先占带宽；背景晚 0.6s 出现不影响观感）
+    if (state.jarvis) setTimeout(jarvisEnsureLoaded, 600);
   } catch (err) {
     console.error(err);
     $('error').classList.remove('hidden');
@@ -759,7 +773,123 @@ function setBackground(on) {
   state.bg = on;
   bgFx.group.visible = on;
   $('btn-bg').classList.toggle('on', on);
+  // 贾维斯开着时透明画布画不出程序化背景（加色元素 alpha=0）——点「背景」视为要切回 3D 背景
+  if (on && state.jarvis) setJarvis(false, true);
 }
+
+/* ------------------------------------------------------------------ */
+/* 贾维斯背景（HALOFLUX 壁纸版 iframe）                                  */
+/* ------------------------------------------------------------------ */
+const jarvisFrame = $('jarvis');
+let jarvisLoaded = false;   // iframe 已注入 src 并完成配置
+
+/** 把壁纸版切成「纯光环」形态：隐藏它的 header / 面板，关掉它的音乐（同源调用） */
+function jarvisConfigure() {
+  const w = jarvisFrame.contentWindow;
+  if (!w || !w.wallpaperPropertyListener) return false;
+  try {
+    w.wallpaperPropertyListener.applyUserProperties({
+      showui: { value: false },     // 只留光环，去掉它的顶栏 / 八块面板
+      music: { value: state.jarvisMusic },
+      scanlines: { value: true },
+      camera: { value: false },     // 关自动运镜 → 光环居中构型，正好框住中央的装甲
+      camzoom: { value: 1 },
+      tempo: { value: 0.5 },        // 节奏放缓，背景不抢戏
+      ringspeed: { value: 0.42 },
+      beamglow: { value: 2.2 },
+    });
+    // 性能裁剪：canvas filter 模糊（depthBlur / webBlur）在这套全屏合成上最贵，
+    // 关掉后观感几乎不变；流线 / 光带数量也压一档。
+    const perf = [
+      ['depthBlur', 0], ['webBlur', 0], ['runnerCount', 260],
+      ['hazeCount', 10], ['flyerCount', 1], ['depthDim', 1.1],
+    ];
+    for (const [k, v] of perf) { try { w.setParam(k, v, true); } catch {} }
+    // 舞台上的文字叠层（STABILITY CHECK / 方法计数 / 公式牌）与装甲页自身 HUD 语义无关，
+    // 内嵌时作为背景只保留纯视觉。同源注入一条样式即可。
+    try {
+      const d = w.document;
+      if (!d.getElementById('mk7-embed-style')) {
+        const s = d.createElement('style');
+        s.id = 'mk7-embed-style';
+        s.textContent = '.ov{display:none!important}.stage::after{opacity:.55}';
+        d.head.appendChild(s);
+      }
+    } catch {}
+    return true;
+  } catch { return false; }
+}
+
+/** 首次启用时才注入 src（避免和 38MB 模型抢带宽）；load 后把壁纸切成纯光环形态 */
+function jarvisEnsureLoaded() {
+  if (jarvisLoaded) { jarvisConfigure(); return; }
+  if (jarvisFrame.dataset.loading === '1') return;
+  jarvisFrame.dataset.loading = '1';
+  jarvisFrame.addEventListener('load', () => {
+    jarvisLoaded = jarvisConfigure();
+    if (!jarvisLoaded) setTimeout(() => {
+      jarvisLoaded = jarvisConfigure();
+      // 两次都配不上（页面缺失 / 加载失败）→ 自动退回程序化背景，避免露出错误页
+      if (!jarvisLoaded) { console.warn('[MK7] 贾维斯背景不可用，回退 3D 背景'); setJarvis(false); }
+    }, 800);
+  }, { once: true });
+  jarvisFrame.src = jarvisFrame.dataset.src;
+}
+
+function setJarvis(on, fromBg) {
+  if (state.jarvis === on) return;
+  state.jarvis = on;
+  const btn = $('btn-jarvis');
+  btn.classList.toggle('on', on);
+  // 透明画布 ↔ 不透明画布：合成通道输出 RT alpha 或恒 1
+  edgeMat.uniforms.uTransparent.value = on ? 1 : 0;
+  jarvisFrame.classList.toggle('on', on);
+  $('jarvisveil').classList.toggle('on', on);
+
+  if (on) {
+    // 程序化背景在透明画布下画不出来，替用户关掉并记住，关贾维斯时恢复
+    if (state.bg) { setBackground(false); state.jarvisHidBg = true; }
+    if (jarvisLoaded) {
+      jarvisConfigure();                             // 重新显示时恢复纯光环形态
+      const w = jarvisFrame.contentWindow;
+      if (w) w.__wpPaused = false;
+    } else if (state.ready) {
+      jarvisEnsureLoaded();                          // 模型已就绪 → 直接加载
+    }
+    // 否则等 boot 完成后再加载（见 state.ready 那行）
+  } else {
+    if (state.jarvisHidBg && !fromBg) { state.jarvisHidBg = false; setBackground(true); }
+    else state.jarvisHidBg = false;
+    // 暂停 iframe 的渲染循环（display:none 也挡不住 rAF，必须显式叫停），音乐一并停掉
+    const w = jarvisFrame.contentWindow;
+    if (w) {
+      w.__wpPaused = true;
+      if (state.jarvisMusic && w.__bgm) { try { w.__bgm.set(false); } catch {} }
+    }
+  }
+}
+
+/** 贾维斯背景音乐（M 键；首次播放需要一次用户手势，按键/点击都算） */
+function toggleJarvisMusic() {
+  if (!state.jarvis) { setJarvis(true); }
+  state.jarvisMusic = !state.jarvisMusic;
+  const w = jarvisFrame.contentWindow;
+  if (w && w.__bgm) {
+    try {
+      w.wallpaperPropertyListener.applyUserProperties({ music: { value: state.jarvisMusic } });
+      if (state.jarvisMusic) w.__bgm.kick();
+    } catch {}
+  }
+}
+
+// HALOFLUX 是第二个全屏动画循环，和主渲染抢 CPU：隔帧暂停 → 背景跑约 30fps，
+// 主渲染的帧率翻倍。HALOFLUX 自己的暂停开关是 window.__wpPaused（见其 frame 循环）。
+let jarvisPhase = 0;
+setInterval(() => {
+  if (!state.jarvis) return;
+  const w = jarvisFrame.contentWindow;
+  if (w) w.__wpPaused = (jarvisPhase++ & 1) === 1;
+}, 16);
 
 /** 仅线条：表面归零；恢复时回到之前的表面值 */
 function setLineOnly(on) {
@@ -791,6 +921,24 @@ function capture() {
   g.addColorStop(1, '#05080b');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, out.width, out.height);
+
+  // 贾维斯背景：同源 → 直接把它 iframe 里的光环画布一起合成进截图，再补一层聚光遮罩
+  if (state.jarvis) {
+    const jc = jarvisFrame.contentWindow?.document?.getElementById('stage');
+    if (jc && jc.width > 1) {
+      ctx.globalAlpha = 0.62;                       // 与 #jarvis 的 opacity 一致
+      ctx.drawImage(jc, 0, 0, out.width, out.height);
+      ctx.globalAlpha = 1;
+      const vg = ctx.createRadialGradient(out.width / 2, out.height * 0.46, 0,
+        out.width / 2, out.height * 0.46, Math.max(out.width, out.height) * 0.55);
+      vg.addColorStop(0, 'rgba(6,9,13,0.72)');
+      vg.addColorStop(0.5, 'rgba(6,9,13,0.34)');
+      vg.addColorStop(1, 'rgba(6,9,13,0)');
+      ctx.fillStyle = vg;
+      ctx.fillRect(0, 0, out.width, out.height);
+    }
+  }
+
   ctx.drawImage(src, 0, 0);
   const a = document.createElement('a');
   a.download = 'mark7-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.png';
@@ -854,6 +1002,7 @@ function initUI() {
     $('btn-flow').classList.toggle('on', state.flow);
   });
   $('btn-bg').addEventListener('click', () => setBackground(!state.bg));
+  $('btn-jarvis').addEventListener('click', () => setJarvis(!state.jarvis));
   $('in-color').addEventListener('input', (e) => {
     state.lineColor = e.target.value;
     edgeMat.uniforms.uLineColor.value.set(state.lineColor);
@@ -881,8 +1030,13 @@ function initUI() {
     else if (k === 'e') toggleSplit();
     else if (k === 'g') $('btn-flow').click();
     else if (k === 'b') setBackground(!state.bg);
+    else if (k === 'j') setJarvis(!state.jarvis);
+    else if (k === 'm') toggleJarvisMusic();
     else if (k === 'f') $('btn-full').click();
   });
+
+  // 按设备类型应用贾维斯初值（桌面默认开、触屏默认关）
+  if (state.jarvisWant) setJarvis(true);
 
   addEventListener('resize', onResize);
 }

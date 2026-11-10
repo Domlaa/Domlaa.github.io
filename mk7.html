@@ -1,4 +1,10 @@
 <!DOCTYPE html>
+<!--
+  「贾维斯」背景层嵌入 HALOFLUX 壁纸版（haloflux/wallpaper/）。
+  HALOFLUX - Copyright (c) 2026 Ryder191 (RYDER CODE / Ms MAIKEBAIs CAT)
+  https://github.com/Ryder191/haloflux · PolyForm Noncommercial 1.0.0（仅限非商业用途）
+  二创须保留本声明并注明出处 "HALOFLUX by Ryder191"。
+-->
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -16,6 +22,9 @@
 </script>
 </head>
 <body>
+<!-- 贾维斯背景（HALOFLUX 壁纸版，同源 iframe；src 由 main.js 首次启用时注入以按需加载） -->
+<iframe id="jarvis" data-src="haloflux/wallpaper/index.html?preset=a" title="贾维斯背景 · HALOFLUX by Ryder191" scrolling="no" tabindex="-1" aria-hidden="true"></iframe>
+<div id="jarvisveil"></div>
 <canvas id="stage"></canvas>
 <div class="vignette"></div>
 
@@ -38,6 +47,7 @@
     <button id="btn-split" title="拆卸 / 合并装甲 (E)">拆卸</button>
     <button id="btn-flow" class="on" title="线条流光 (G)">流光</button>
     <button id="btn-bg" class="on" title="3D 空间背景 (B)">背景</button>
+    <button id="btn-jarvis" title="贾维斯背景 · HALOFLUX (J)">贾维斯</button>
     <button id="btn-invert" title="暗线 / 亮线 (L)">暗线</button>
     <label class="picker" title="线条颜色">
       <input id="in-color" type="color" value="#dbedff">
@@ -62,7 +72,8 @@
   </div>
 </nav>
 
-<p class="hint">拖拽旋转 · 滚轮缩放 · 双击重置 · O 纯线稿 · E 拆卸 · G 流光 · B 背景</p>
+<p class="hint">拖拽旋转 · 滚轮缩放 · 双击重置 · O 纯线稿 · E 拆卸 · G 流光 · B 背景 · J 贾维斯 · M 音乐</p>
+<p class="credit">贾维斯背景：<a href="https://github.com/Ryder191/haloflux" target="_blank" rel="noopener">HALOFLUX</a> by Ryder191 · PolyForm NC</p>
 <a class="back" href="./mk85.html">MK85 实景 →</a>
 
 <div class="loader" id="loader">
