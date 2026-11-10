@@ -33,6 +33,9 @@ const CONFIG = {
   flat: false,          // 结构线模式：丢弃贴图，装甲换成同一套素模材质（只留几何轮廓线）
   splitZoom: 1.40,      // 拆解态的相机后拉倍率（零件向四周散开，需要让出取景空间）
   splitTargetY: 0.50,   // 拆解态视点高度（× 身高）：整体外扩后重心回到身高中段
+  coreY: 0.775,         // 反应堆锚点高度（× 模型身高）：胸口反应堆中心（可 ?corey= 覆盖）
+  coreZ: 0.62,          // 锚点深度兜底值（× 模型最大 z）：正常情况下由射线吸附到真实表面
+  coreR: 0.036,         // 反应堆光斑半径（× 模型身高）；宽体模型可调大
 };
 
 // 允许覆盖模型路径：优先级 ?model=… 查询参数 > 引入脚本的 data-model 属性 > CONFIG 默认值。
@@ -60,6 +63,15 @@ const CONFIG = {
 
   // 结构线模式（?flat=1）：不吃贴图，多材质模型切成单材质后不会出现错贴图黑洞
   CONFIG.flat = u.get('flat') === '1';
+
+  // 反应堆锚点微调（?corey=0.72&corez=0.55）：不同体型（反浩克 / MK VII）胸位不同，
+  // 宿主页可按需覆盖，不写则用 CONFIG 默认值。
+  const coreYOverride = Number(u.get('corey') || (scriptEl() && scriptEl().dataset.corey));
+  if (Number.isFinite(coreYOverride) && coreYOverride > 0) CONFIG.coreY = coreYOverride;
+  const coreZOverride = Number(u.get('corez') || (scriptEl() && scriptEl().dataset.corez));
+  if (Number.isFinite(coreZOverride) && coreZOverride > 0) CONFIG.coreZ = coreZOverride;
+  const coreROverride = Number(u.get('corer') || (scriptEl() && scriptEl().dataset.corer));
+  if (Number.isFinite(coreROverride) && coreROverride > 0) CONFIG.coreR = coreROverride;
 }
 
 const state = {
@@ -460,6 +472,14 @@ const edgeMat = new THREE.ShaderMaterial({
     uLineColor: { value: new THREE.Color(state.lineColor) },
     uTime: { value: 0 },
     uFlow: { value: 0.9 },
+    // 反应堆核心辉光：真正的 3D 表面光斑。
+    // 合成阶段用深度纹理重建每个像素的世界坐标，再按「到锚点的空间距离」衰减 ——
+    // 透视、缩放、胸甲倾斜、手臂遮挡全部自动成立，不再是浮在画面上的圆形贴纸。
+    uCoreWorld: { value: new THREE.Vector3() },
+    uCoreOn: { value: 0 },
+    uCoreR: { value: CONFIG.coreR * CONFIG.targetHeight },
+    uInvProj: { value: camera.projectionMatrixInverse },
+    uCamWorld: { value: camera.matrixWorld },
     // embed 默认透明输出（只取装甲本体）；solid=1 时不透明输出，
     // 这样加色混合的 3D 背景才有 alpha 可透出 —— 宿主用 mix-blend-mode:screen 把黑底筛掉。
     uTransparent: { value: EMBED && EMBED_QS.get('solid') !== '1' ? 1 : 0 },
@@ -477,6 +497,9 @@ const edgeMat = new THREE.ShaderMaterial({
     uniform vec2 uTexel;
     uniform float uStrength, uThickness, uNormalW, uDepthW, uNear, uFar, uLight, uLumW, uDetail, uSurface, uTime, uFlow, uTransparent;
     uniform vec3 uLineColor;
+    uniform vec3 uCoreWorld;
+    uniform float uCoreOn, uCoreR;
+    uniform mat4 uInvProj, uCamWorld;
 
     float linDepth(vec2 uv) {
       float z = texture2D(tDepth, uv).x;
@@ -485,6 +508,16 @@ const edgeMat = new THREE.ShaderMaterial({
     }
     vec3 nrm(vec2 uv) { return texture2D(tNormal, uv).xyz * 2.0 - 1.0; }
     float lum(vec2 uv) { return dot(texture2D(tColor, uv).rgb, vec3(0.2126, 0.7152, 0.0722)); }
+
+    /* 深度 → 世界坐标。合成 pass 是全屏 quad、没有几何信息，但深度纹理记录了
+       每个像素的视空间 z：反投影回去就能知道「这个像素落在哪块真实表面上」。
+       背景像素深度为 1（远平面），会落到极远处，光斑自然照不到。 */
+    vec3 worldAt(vec2 uv) {
+      float dz = texture2D(tDepth, uv).x;
+      vec4 clip = vec4(uv * 2.0 - 1.0, dz * 2.0 - 1.0, 1.0);
+      vec4 view = uInvProj * clip;
+      return (uCamWorld * vec4(view.xyz / view.w, 1.0)).xyz;
+    }
 
     void main() {
       vec2 o = uTexel * uThickness;
@@ -546,18 +579,41 @@ const edgeMat = new THREE.ShaderMaterial({
       float sweep = fract(uTime * 0.11);                             // 9.1s 一趟，缓
       float bandY = mix(-0.55, 1.55, sweep);                         // 带心 y（0 = 底, 1 = 顶）
       float dz = vUv.y - bandY;
-      float below = exp(-max(dz, 0.0) * 3.4);                        // 已扫过（下方）：长余晖
-      float above = exp(-max(-dz, 0.0) * 8.0);                       // 未扫到（上方）：短前缘
+      // v4：光带收窄拉对比。拖尾 3.4→4.4、前缘 8.0→16.0，
+      // 亮部只占画面很小一段，其余回到基线 → 扫过时才有「一道光划过」的锐利感。
+      float below = exp(-max(dz, 0.0) * 4.4);                        // 已扫过（下方）：余晖
+      float above = exp(-max(-dz, 0.0) * 16.0);                      // 未扫到（上方）：锐利前缘
       float pulse = mix(below, above, step(0.0, -dz)) * uFlow;
 
       vec3 ink = vec3(0.012, 0.017, 0.024);
-      float baseDim = mix(1.0, 0.78, clamp(uFlow * 1.1, 0.0, 1.0));  // 流光开启 → 基线略压暗
+      // 基线压到 0.52×（原 0.78×）：流光与静态线条的分离度靠「暗部更暗」撑起来
+      float baseDim = mix(1.0, 0.52, clamp(uFlow * 1.15, 0.0, 1.0));
       vec3 lineCol = mix(ink, uLineColor * baseDim, lineLight);
-      // 峰值由旧版的 ~3.1× 收到 ~2.15×，且光带边缘平滑回落到 1.30×，
-      // 与暗部基线 0.78× 之间是一整段连续过渡，不再有亮暗突跳。
-      vec3 pulseCol = uLineColor * (1.30 + 0.85 * pulse);
+      // 峰值 ~3.3×（原 2.15×），并朝白热轻微偏移：亮部更「烧」，与 0.52× 的暗部
+      // 形成约 6.3:1 的亮度比（原 2.76:1），扫过的痕迹一眼可见。
+      vec3 pulseCol = mix(uLineColor * (1.22 + 2.05 * pulse), vec3(1.0), pulse * 0.22);
       lineCol = mix(lineCol, pulseCol, pulse);
-      col = mix(col, lineCol, edge * mix(0.92, 0.5, lineLight) * (1.0 + pulse * 0.28));
+      // 混合系数随 pulse 推到 1：此前恒为 0.5~0.92，pulseCol 再亮也被腰斩——
+      // 这正是「流光不够明显」的根因。现在光带处线条完全替换成 3.3× 白热色。
+      col = mix(col, lineCol, edge * clamp(mix(0.92, 0.5, lineLight) * (1.0 + pulse * 1.4), 0.0, 1.0));
+
+      // 反应堆核心：贴在装甲表面的真实 3D 光斑。
+      // 发光强度按「像素所在表面点到锚点的空间距离」衰减，不是屏幕距离 ——
+      // 转动时贴着胸甲走（斜看自然压成椭圆、贴近时变大），
+      // 手臂挡在前面那块像素其实在手臂表面、离锚点很远，光也就不会透过去。
+      // r 以反应堆外缘为 1：光核 < 1，外晕略溢出，光环在 ~1.3 处呼吸。
+      {
+        float r = distance(worldAt(vUv), uCoreWorld) / uCoreR;
+        float beat = 0.86 + 0.14 * sin(uTime * 2.35);
+        float core = exp(-r * r * 9.0);                               // 白热光核
+        float halo = exp(-r * r * 2.2);                               // 冷青外晕
+        float ringR = 1.32 + 0.30 * (0.5 + 0.5 * sin(uTime * 2.35 + 1.1));
+        float ring = exp(-pow((r - ringR) * 5.0, 2.0));               // 呼吸光环
+        vec3 coreCol = vec3(0.58, 0.90, 1.00);
+        float k = uCoreOn;
+        col += coreCol * (core * 2.40 + halo * 0.52 + ring * 0.38) * beat * k;
+        col += vec3(1.0) * core * 0.95 * beat * k;                    // 核心偏白，避免整块发青
+      }
 
       // 输出 alpha：贾维斯模式透传 RT alpha（装甲 1 / 背景 0，iframe 从画布下面透出），
       // 普通模式恒为 1（不透明，保持程序化 3D 背景的观感）。mask 即 tColor.a。
@@ -830,6 +886,28 @@ async function boot() {
       });
     }
     scene.add(group);
+    // 反应堆锚点：胸口中线前表面。必须在设初始朝向前算（此时 group 无旋转），
+    // 否则 Box3 会把 rotation 也算进去，锚点跟着偏。
+    {
+      group.updateMatrixWorld(true);
+      const bb = new THREE.Box3().setFromObject(group);
+      const h = bb.max.y - bb.min.y;
+      const cx = (bb.min.x + bb.max.x) / 2;
+      const y = bb.min.y + h * CONFIG.coreY;
+      // 从正前方朝 -Z 打射线，把锚点吸附到胸甲「真实外表面」——
+      // bbox 深度比例猜出来的点会嵌进身体（光核半径小于嵌入深度时前表面照不到光），
+      // 吸附后 r=0 的亮核正好落在反应堆位置。
+      const probe = new THREE.Raycaster(
+        new THREE.Vector3(cx, y, bb.max.z + h),
+        new THREE.Vector3(0, 0, -1),
+      );
+      const hit = probe.intersectObject(group, true)[0];
+      state.coreBase = hit
+        ? hit.point.clone()
+        : new THREE.Vector3(cx, y, bb.max.z * CONFIG.coreZ);
+      // 光斑半径按真实身高换算（世界单位）：缩放 / 换模型都自动适配
+      edgeMat.uniforms.uCoreR.value = h * CONFIG.coreR;
+    }
     group.rotation.y = THREE.MathUtils.degToRad(CONFIG.rot0);
     model = group;
 
@@ -887,6 +965,12 @@ let last = performance.now();
 let frames = 0, fpsTimer = 0;
 let slowFrames = 0;
 
+// 反应堆投影用的临时对象（避免每帧分配）
+const _upAxis = new THREE.Vector3(0, 1, 0);
+const _coreWorld = new THREE.Vector3();
+const _toCam = new THREE.Vector3();
+const _fwd = new THREE.Vector3();
+
 function tick() {
   requestAnimationFrame(tick);
   const now = performance.now();
@@ -936,6 +1020,19 @@ function tick() {
   // 流光强度朝目标缓动（约 0.4s 淡入/淡出）：开关切换时不闪一下
   const flowUni = edgeMat.uniforms.uFlow;
   flowUni.value += ((state.flow ? 0.9 : 0) - flowUni.value) * Math.min(1, dt * 6.5);
+
+  // 反应堆核心投影：锚点绕 Y 轴跟随模型自转 → 世界坐标。
+  // 位置交给 shader 按 3D 距离判定，这里只负责把锚点放到正确的世界位置。
+  if (model && state.coreBase) {
+    const ry = model.rotation.y;
+    _coreWorld.copy(state.coreBase).applyAxisAngle(_upAxis, ry);
+    edgeMat.uniforms.uCoreWorld.value.copy(_coreWorld);
+    // 3D 距离已能裁掉背面像素；这里只兜住「薄壳模型没有背面几何」的极端情况
+    const facing = _toCam.copy(camera.position).sub(_coreWorld).normalize()
+      .dot(_fwd.set(Math.sin(ry), 0, Math.cos(ry)));
+    const on = facing > -0.05 ? 1 : 0;
+    edgeMat.uniforms.uCoreOn.value += (on - edgeMat.uniforms.uCoreOn.value) * Math.min(1, dt * 8);
+  }
 
   // 背景动画：闪烁 / 光柱起伏 + 扫描环垂直往返
   if (state.bg) {
