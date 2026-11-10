@@ -1,8 +1,9 @@
 /**
  * main.js — 系统编排入口
  *
- * 启动流程：WebGL2 检测 → 场景 → 模型加载（切分） → 反应堆/粒子 →
- * 数字化显现动画 → HUD 上线。渲染循环统一驱动：自转 / 扫描 / 补间 / HUD。
+ * 启动流程：WebGL2 检测 → 场景 → 模型加载（切分） → 舞台 / 取景 →
+ * 边缘线条管线 → 数字化构建擦除 → HUD 上线。
+ * 渲染循环统一驱动：自转 / 流光时钟 / 粒子 / 反应堆 / 补间 / HUD。
  */
 import * as THREE from 'three';
 import { isWebGL2Available, SceneManager } from './core/SceneManager.js';
@@ -13,7 +14,7 @@ import { TweenEngine } from './animation/TweenEngine.js';
 import { ArmorExplode } from './animation/ArmorExplode.js';
 import { ArmorRaycaster } from './interaction/ArmorRaycaster.js';
 import { HUD } from './ui/HUD.js';
-import { HolographicMaterial } from './materials/HolographicMaterial.js';
+import { SCENE_CONFIG } from './config/armor.config.js';
 
 const $ = (id) => document.getElementById(id);
 const bootLog = $('boot-log');
@@ -34,6 +35,7 @@ async function boot() {
   const sceneManager = new SceneManager(canvas);
   const tweens = new TweenEngine();
   const armor = new ArmorModel();
+  const edge = sceneManager.edge;
 
   log('LOADING ARMOR GEOMETRY…', 0.05);
 
@@ -52,62 +54,86 @@ async function boot() {
   if (chest) {
     const bb = chest.mesh.geometry.boundingBox;
     const y = bb.min.y + (bb.max.y - bb.min.y) * 0.72;
-    const reactor = new ArcReactor(new THREE.Vector3(0, y, bb.max.z + 0.02));
+    const z = bb.max.z + (armor.height * 0.012);
+    const reactor = new ArcReactor(new THREE.Vector3(0, y, z));
+    reactor.pivot.scale.setScalar(armor.height / 2.6);
     armor.attachProceduralModule(reactor);
     armor._reactor = reactor;
   }
 
-  // 环境粒子（挂在战甲组内，随自转）
-  const particles = new ParticleField(420, armor.height);
+  // 环境粒子（挂在战甲组内，随自转；按模型高度缩放）
+  const particles = new ParticleField(SCENE_CONFIG.particles, armor.height);
+  particles.points.scale.setScalar(armor.height / 1.85);
   armor.group.add(particles.points);
+
   sceneManager.scene.add(armor.group);
 
-  // 拆解系统与拾取
-  const explode = new ArmorExplode(armor, tweens);
+  // 拆解系统与拾取（高模 + 宽体：位移收敛，拆开时相机后拉）
+  const explode = new ArmorExplode(armor, tweens, SCENE_CONFIG.explodeScale);
+  const explodeCtl = {
+    explode: () => { explode.explode(); sceneManager.zoom(SCENE_CONFIG.explodeZoom, tweens); },
+    assemble: () => { explode.assemble(); sceneManager.zoom(1.0, tweens); },
+  };
   const raycaster = new ArmorRaycaster(canvas, armor, sceneManager, (m) => hud.renderInfo(m));
 
-  // HUD
+  // 渲染状态
+  const state = {
+    paused: false,
+    spin: SCENE_CONFIG.autoSpin,     // 与滑条默认值 30 对应（30/100 × 0.6）
+    time: 0,
+  };
+
+  // HUD（先显示再取景：舞台区尺寸来自已排版的网格）
   const hud = new HUD({
-    armor, sceneManager, explode, tweens,
-    onScanSpeed: (n) => { state.scanSpeed = 0.12 + n * 0.85; },
-    onOpacity: (n) => armor.setOpacity(0.15 + n * 0.85),
-    onSpin: (n) => { state.spin = n * 0.7; },
-    onToggleHolo: (on) => armor.setHologram(on),
-    onToggleWire: (on) => armor.setWireframe(on),
+    armor, sceneManager, explode: explodeCtl, tweens,
+    onSpin: (n) => { state.spin = n * 0.6; },
+    getSpin: () => state.spin,
+    onToggleLines: (on) => edge.setStrength(on ? 0.95 : 0),
+    onToggleFlow: (on) => edge.setFlow(on ? SCENE_CONFIG.line.flow : 0),
+    onLine: (n) => edge.setStrength(n),
+    onWidth: (n) => edge.setWidth(n),
+    onFlowSpeed: (n) => edge.setFlowSpeed(n * 0.5),
     onPause: (paused) => {
       state.paused = paused;
       if (paused) tweens.pause(); else tweens.resume();
     },
     onReset: () => sceneManager.resetView(tweens),
   });
+  hud.show();
+
+  sceneManager.buildStage(armor.box);
+  sceneManager.frame(armor.box);
+  sceneManager.resetView();
+  edge.sync(sceneManager.camera);
 
   // 面板统计
   let tris = 0;
   for (const m of armor.modules.values()) tris += m.tris || 0;
-  $('sys-tris').textContent = tris.toLocaleString();
+  $('sys-tris').textContent = tris.toLocaleString('en-US');
 
-  // 应用状态（渲染循环使用，避免 Vue 式高频响应式开销）
-  const state = {
-    paused: false,
-    spin: 0.3 * 0.7,          // 与滑条默认值 30 对应
-    scanSpeed: 0.12 + 0.35 * 0.85,
-    time: 0,
-  };
-
-  // 数字化显现 → HUD 上线
+  // 数字化构建：等启动画面开始淡出后再自下而上擦出模型
   log('CALIBRATING HOLOGRAM…', 1);
-  explode.materialize(2.4);
+  edge.setWipe(0);
+
   setTimeout(() => {
     const bootEl = $('boot');
     bootEl.classList.add('fade');
-    hud.show();
     setTimeout(() => bootEl.remove(), 900);
+
+    tweens.add({
+      tag: 'wipe',
+      duration: 1.9,
+      ease: 'outCubic',
+      delay: 0.15,
+      onUpdate: (_r, e) => edge.setWipe(e),
+      onComplete: () => edge.setWipe(1),
+    });
   }, 700);
 
   /* ---------------- 渲染循环 ---------------- */
   const clock = new THREE.Clock();
   let running = true;
-  let slowTime = 0; // 连续低帧率累计时长 → 触发降级
+  let slowTime = 0;
 
   function loop() {
     if (!running) return;
@@ -116,17 +142,13 @@ async function boot() {
 
     if (!state.paused) {
       state.time += dt;
-      // 自转
       armor.group.rotation.y += state.spin * dt;
-      // 扫描线循环（-0.15 → 1.15）
-      const cycle = 1.3;
-      HolographicMaterial.globals.uScanY.value = ((state.time * state.scanSpeed) % cycle) - 0.15;
-      HolographicMaterial.globals.uTime.value = state.time;
       particles.update(dt, state.time);
       if (armor._reactor) armor._reactor.update(dt, state.time);
       tweens.update(dt);
     }
-    armor.update(dt, state.time);
+    armor.update(dt);
+    sceneManager.time = state.time;
 
     // 性能自适应：连续 3 秒低于 38fps 则降级一次
     if (dt > 1 / 38) {
@@ -136,7 +158,11 @@ async function boot() {
       slowTime = Math.max(0, slowTime - dt * 0.5);
     }
 
-    sceneManager.render();
+    sceneManager.render({
+      armorRoot: armor.group,
+      highlight: armor.highlightPivots(),
+      hide: [particles.points],
+    });
     hud.update(dt, state.time);
   }
   loop();
@@ -155,7 +181,10 @@ async function boot() {
     sceneManager.dispose();
   });
 
-  console.info(`[Armor] 系统上线：${armor.modules.size} 个模块，${tris} 三角面`);
+  console.info(`[Armor] 系统上线：${armor.modules.size} 个模块，${tris} 三角面，高度 ${armor.height.toFixed(2)}`);
+
+  // 调试 / 自动截图用句柄
+  window.__HOME = { THREE, sceneManager, armor, edge, hud, state, explode: explodeCtl, explodeRaw: explode };
 }
 
 boot();

@@ -11,10 +11,12 @@ export class ArmorExplode {
   /**
    * @param {import('../model/ArmorModel.js').ArmorModel} armor
    * @param {import('./TweenEngine.js').TweenEngine} tweens
+   * @param {number} [offsetScale] 拆解位移倍率（宽体/高模按需收敛，避免飞出取景）
    */
-  constructor(armor, tweens) {
+  constructor(armor, tweens, offsetScale = 1) {
     this.armor = armor;
     this.tweens = tweens;
+    this.offsetScale = offsetScale;
     this.exploded = false;
     this.explodeT = 0; // 全局拆解进度（用于按钮状态）
   }
@@ -42,7 +44,7 @@ export class ArmorExplode {
     for (const m of this.armor.modules.values()) {
       const from = m.explodeT;
       const def = m.def;
-      const off = def.explode ? new THREE_OFF(def.explode, H) : null;
+      const off = def.explode ? new THREE_OFF(def.explode, H * this.offsetScale) : null;
       const rot = def.rotate || [0, 0, 0];
       const tag = `explode:${m.id}`;
       this.tweens.add({

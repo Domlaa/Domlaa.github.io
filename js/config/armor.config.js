@@ -1,23 +1,23 @@
 /**
  * armor.config.js — 战甲模块配置
  *
- * 分区阈值基于对 armor.glb（Sketchfab 单网格模型，高约 1.2 单位，A-pose，面向 +z）
- * 的顶点空间分析得出：t 为归一化高度 (y / H)。
- * 未来替换其他 GLB 模型时，只需在 ArmorModel 中调整 fitTuning，无需改动渲染系统。
+ * 分区阈值基于归一化空间（t = y/H，H 为模型总高，x 左右、z 前后，模型面向 +z）。
+ * 换模型时只需按身体比例微调阈值，无需改动渲染系统。
  */
 
-export const MODEL_URL = './assets/models/armor.glb';
+export const MODEL_URL = './model/tiny/hulk+buster2_optimized.glb';
 
-export const ARMOR_NAME = 'MARK LXXXV';
+export const ARMOR_NAME = 'MARK XLIV';
+export const ARMOR_SUB = 'HULK BUSTER';
 
 /** 空间切分阈值（t = y/H，x 为左右轴，z 为前后轴，模型面向 +z） */
 export const SEGMENT_THRESHOLDS = {
-  helmetTop: 0.865,   // t 高于此值 → 头盔
-  armX: 0.19,         // |x| 超过此值（躯干高度带内）→ 手臂区
-  handTop: 0.56,      // 手臂区内 t 低于此值 → 手部（腕部切点）
-  armMinT: 0.36,      // 手臂区最低高度（指尖）
-  waist: 0.47,        // 躯干/大腿分界（腰部切割线）
-  backZ: -0.06,       // 躯干高度带内 z 低于此值 → 背部
+  helmetTop: 0.885,   // t 高于此值 → 头盔
+  armX: 0.255,        // |x| 超过此值（躯干高度带内）→ 手臂区（反浩克肩宽，阈值需放宽）
+  handTop: 0.50,      // 手臂区内 t 低于此值 → 手部（腕部切点）
+  armMinT: 0.30,      // 手臂区最低高度（指尖）
+  waist: 0.455,       // 躯干/大腿分界（腰部切割线）
+  backZ: -0.055,      // 躯干高度带内 z 低于此值 → 背部
 };
 
 /**
@@ -142,13 +142,13 @@ export const MODULES = [
 
 /** 相机与场景 */
 export const SCENE_CONFIG = {
-  cameraFov: 40,
-  cameraPos: [1.75, 1.42, 2.95],
-  target: [0, 0.62, 0],
-  minDistance: 1.1,
-  maxDistance: 6.5,
-  autoSpin: 0.18,        // 默认自转 rad/s（滑条 30/100）
-  bloom: { strength: 0.42, radius: 0.55, threshold: 0.82 },
-  particles: 420,
+  cameraFov: 32,
+  fitScale: 1.18,      // 取景距离倍率（宽体模型可略放大）
+  explodeScale: 0.5,   // 拆解位移倍率（高模宽体收敛，避免飞出取景）
+  explodeZoom: 1.46,   // 拆解时相机后拉倍率
+  autoSpin: 0.18,      // 默认自转 rad/s（滑条 30/100）
+  particles: 380,
   bg: 0x030912,
+  /** 线条 / 流光默认值 */
+  line: { strength: 0.95, width: 1.1, flow: 0.9, speed: 0.22, surface: 0.30, color: '#9fe8ff' },
 };

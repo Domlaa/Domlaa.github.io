@@ -9,6 +9,14 @@
  */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+// Draco 解码器（本地化在 lib/three/addons/libs/draco/）；非压缩模型走原路径，行为不变
+let _draco = null;
+function dracoLoader() {
+  if (!_draco) _draco = new DRACOLoader().setDecoderPath('./lib/three/addons/libs/draco/');
+  return _draco;
+}
 
 /**
  * @param {string} url
@@ -17,7 +25,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
  */
 export function loadArmorGeometry(url, onProgress) {
   return new Promise((resolve, reject) => {
-    const loader = new GLTFLoader();
+    const loader = new GLTFLoader().setDRACOLoader(dracoLoader());
     loader.load(
       url,
       (gltf) => {

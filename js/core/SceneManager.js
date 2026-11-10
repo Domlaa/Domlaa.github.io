@@ -1,13 +1,13 @@
 /**
- * SceneManager.js — 场景 / 相机 / 渲染器 / 辉光后期 / 环境网格
+ * SceneManager.js — 场景 / 相机 / 渲染器 / 线条后期 / 全息舞台
+ *
+ * 渲染走 EdgePass 三通道（法线 / 颜色+深度 / 合成），因此不再需要 EffectComposer 辉光：
+ * 线条本身由边缘检测产生，亮度已经在合成通道里拉开。
  */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SCENE_CONFIG } from '../config/armor.config.js';
+import { EdgePass } from './EdgePass.js';
 
 export function isWebGL2Available() {
   try {
@@ -28,144 +28,206 @@ export class SceneManager {
       alpha: false,
       powerPreference: 'high-performance',
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.8));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setClearColor(SCENE_CONFIG.bg, 1);
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(SCENE_CONFIG.bg);
-    this.scene.fog = new THREE.FogExp2(SCENE_CONFIG.bg, 0.12);
+    this.scene.fog = new THREE.FogExp2(SCENE_CONFIG.bg, 0.09);
 
     this.camera = new THREE.PerspectiveCamera(
       SCENE_CONFIG.cameraFov,
       window.innerWidth / window.innerHeight,
       0.05,
-      60,
+      120,
     );
-    this.camera.position.set(...SCENE_CONFIG.cameraPos);
 
     this.controls = new OrbitControls(this.camera, canvas);
-    this.controls.target.set(...SCENE_CONFIG.target);
     this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.08;
-    this.controls.minDistance = SCENE_CONFIG.minDistance;
-    this.controls.maxDistance = SCENE_CONFIG.maxDistance;
-    this.controls.maxPolarAngle = Math.PI * 0.62;
+    this.controls.dampingFactor = 0.075;
     this.controls.enablePan = false;
+    this.controls.maxPolarAngle = Math.PI * 0.58;
+    this.controls.rotateSpeed = 0.75;
 
-    // 辉光后期
-    this.composer = new EffectComposer(this.renderer);
-    this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.bloom = new UnrealBloomPass(
-      new THREE.Vector2(window.innerWidth, window.innerHeight),
-      SCENE_CONFIG.bloom.strength,
-      SCENE_CONFIG.bloom.radius,
-      SCENE_CONFIG.bloom.threshold,
-    );
-    this.composer.addPass(this.bloom);
-    this.composer.addPass(new OutputPass());
-
-    // 灯光（主要供实体模式与反应堆点光）
-    this.scene.add(new THREE.HemisphereLight(0x3a5a72, 0x050a10, 0.7));
-    const key = new THREE.DirectionalLight(0xbfeaff, 0.9);
-    key.position.set(2, 3, 2.5);
+    // 灯（暗色底材依靠微弱明暗交代体块）
+    this.scene.add(new THREE.HemisphereLight(0x2f5f7a, 0x030a10, 0.85));
+    const key = new THREE.DirectionalLight(0xbfeaff, 1.1);
+    key.position.set(2.4, 3.2, 2.6);
     this.scene.add(key);
+    const rim = new THREE.DirectionalLight(0x3f86c8, 0.8);
+    rim.position.set(-2.2, 1.4, -2.4);
+    this.scene.add(rim);
 
-    this._buildPlatform();
-    this._buildBackdropGrid();
+    // 线条 + 流光合成通道
+    this.edge = new EdgePass(this.renderer, {
+      ...SCENE_CONFIG.line,
+      bg: SCENE_CONFIG.bg,
+    });
+
+    this.stageGroup = new THREE.Group();
+    this.scene.add(this.stageGroup);
+
+    this.time = 0;
+    this._fit = { dist: 4, targetY: 1 };
 
     this._onResize = () => this.resize();
     window.addEventListener('resize', this._onResize);
     this.resize();
   }
 
-  /** 脚下全息平台：同心圆 + 放射网格 */
-  _buildPlatform() {
-    const group = new THREE.Group();
+  /* ---------------- 舞台（随模型尺寸缩放） ---------------- */
+  buildStage(box) {
+    const H = box.h;
+    const R = Math.max(box.w, box.h) * 0.72;
 
-    const ringGeo = new THREE.RingGeometry(0.62, 0.645, 64);
+    // 地面极坐标网格
+    const grid = new THREE.PolarGridHelper(H * 1.05, 12, 6, 96, 0x1f5f7a, 0x0d3145);
+    grid.material.transparent = true;
+    grid.material.opacity = 0.55;
+    grid.material.depthWrite = false;
+    grid.position.y = 0.0008 * H;
+    this.stageGroup.add(grid);
+
+    // 内圈亮环 + 细描边
     const ringMat = new THREE.MeshBasicMaterial({
-      color: 0x2fb9e6, transparent: true, opacity: 0.5,
+      color: 0x4fd2ff, transparent: true, opacity: 0.55,
       blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
     });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.rotation.x = -Math.PI / 2;
-    group.add(ring);
+    const inner = new THREE.Mesh(new THREE.RingGeometry(R * 0.68, R * 0.684, 96), ringMat);
+    inner.rotation.x = -Math.PI / 2;
+    this.stageGroup.add(inner);
 
-    const ring2 = new THREE.Mesh(new THREE.RingGeometry(0.86, 0.868, 64), ringMat.clone());
-    ring2.material.opacity = 0.25;
-    ring2.rotation.x = -Math.PI / 2;
-    group.add(ring2);
+    const outerMat = ringMat.clone();
+    outerMat.opacity = 0.22;
+    const outer = new THREE.Mesh(new THREE.RingGeometry(R * 0.995, R, 96), outerMat);
+    outer.rotation.x = -Math.PI / 2;
+    this.stageGroup.add(outer);
 
-    // 放射线
-    const spokes = 48;
-    const spokeGeo = new THREE.BufferGeometry();
+    // 放射刻度
+    const spokes = 72;
     const pts = [];
     for (let i = 0; i < spokes; i++) {
       const a = (i / spokes) * Math.PI * 2;
-      pts.push(Math.cos(a) * 0.65, 0.001, Math.sin(a) * 0.65);
-      pts.push(Math.cos(a) * 0.86, 0.001, Math.sin(a) * 0.86);
+      const long = i % 6 === 0;
+      const r0 = R * (long ? 0.9 : 0.955);
+      pts.push(Math.cos(a) * r0, 0.001, Math.sin(a) * r0);
+      pts.push(Math.cos(a) * R * 0.995, 0.001, Math.sin(a) * R * 0.995);
     }
+    const spokeGeo = new THREE.BufferGeometry();
     spokeGeo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    const spokesMesh = new THREE.LineSegments(spokeGeo, new THREE.LineBasicMaterial({
-      color: 0x2fb9e6, transparent: true, opacity: 0.16,
+    const spokeMesh = new THREE.LineSegments(spokeGeo, new THREE.LineBasicMaterial({
+      color: 0x4fd2ff, transparent: true, opacity: 0.20,
       blending: THREE.AdditiveBlending, depthWrite: false,
     }));
-    group.add(spokesMesh);
+    this.stageGroup.add(spokeMesh);
 
-    // 地面微光圆盘
+    // 地面辉光
     const glow = new THREE.Mesh(
-      new THREE.CircleGeometry(0.9, 48),
+      new THREE.CircleGeometry(R, 64),
       new THREE.MeshBasicMaterial({
-        color: 0x0c4a66, transparent: true, opacity: 0.18,
+        color: 0x0a3f57, transparent: true, opacity: 0.22,
         blending: THREE.AdditiveBlending, depthWrite: false,
       }),
     );
     glow.rotation.x = -Math.PI / 2;
-    glow.position.y = -0.002;
-    group.add(glow);
+    glow.position.y = -0.001 * H;
+    this.stageGroup.add(glow);
 
-    this.platform = group;
-    this.scene.add(group);
+    this._stageR = R;
   }
 
-  /** 远景科技网格（细线地面网格） */
-  _buildBackdropGrid() {
-    const grid = new THREE.GridHelper(30, 60, 0x0f3a52, 0x0a2436);
-    grid.material.transparent = true;
-    grid.material.opacity = 0.35;
-    grid.material.depthWrite = false;
-    grid.position.y = -0.01;
-    this.scene.add(grid);
+  /* ---------------- 取景 ---------------- */
+  /** 舞台区（中央网格格）：模型只在这一块里取景 */
+  _stageRect() {
+    const st = document.querySelector('.stage');
+    const r = st ? st.getBoundingClientRect() : null;
+    if (r && r.width > 40 && r.height > 40) return r;
+    return { left: 0, top: 60, width: window.innerWidth, height: window.innerHeight - 160 };
   }
 
-  /** 恢复默认视角 */
+  /**
+   * 把模型放进舞台区并垂直居中。
+   * @param {{w:number,h:number,d:number}} box
+   */
+  frame(box) {
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const vFov = THREE.MathUtils.degToRad(SCENE_CONFIG.cameraFov);
+    const st = this._stageRect();
+    const visW = st.width;
+    const visH = st.height;
+
+    const halfTan = Math.tan(vFov / 2);
+    const dV = (box.h / 2) / halfTan * (vh / visH);
+    const dH = (box.w / 2) / (halfTan * this.camera.aspect) * (vw / visW);
+    const dist = Math.max(dV, dH) * SCENE_CONFIG.fitScale;
+
+    const pxPerUnit = vh / (2 * halfTan * dist);
+    // 舞台中心比视口中心偏上时，视线目标要相应下移，模型才会落在舞台里
+    const shiftPx = vh / 2 - (st.top + visH / 2);
+
+    this._fit.dist = dist;
+    this._fit.targetY = box.h * 0.5 - shiftPx / pxPerUnit;
+
+    this.controls.minDistance = dist * 0.42;
+    this.controls.maxDistance = dist * 2.3;
+    this.edge.setBand(st.left / vw, (st.left + st.width) / vw);
+    return this._fit;
+  }
+
+  /** 默认视角（斜前方） */
   resetView(tweens) {
-    const cam = this.camera, ctl = this.controls;
-    const p0 = cam.position.clone();
-    const t0 = ctl.target.clone();
-    const p1 = new THREE.Vector3(...SCENE_CONFIG.cameraPos);
-    const t1 = new THREE.Vector3(...SCENE_CONFIG.target);
+    const fit = this._fit;
+    const dir = new THREE.Vector3(0.24, 0.08, 1).normalize();
+    const p1 = new THREE.Vector3(0, fit.targetY, 0).addScaledVector(dir, fit.dist);
+    const t1 = new THREE.Vector3(0, fit.targetY, 0);
+
+    if (!tweens) {
+      this.camera.position.copy(p1);
+      this.controls.target.copy(t1);
+      this.controls.update();
+      return;
+    }
+    const p0 = this.camera.position.clone();
+    const t0 = this.controls.target.clone();
     tweens.add({
       tag: 'resetView',
-      duration: 1.1,
+      duration: 1.0,
       ease: 'inOutCubic',
       onUpdate: (_r, e) => {
-        cam.position.lerpVectors(p0, p1, e);
-        ctl.target.lerpVectors(t0, t1, e);
+        this.camera.position.lerpVectors(p0, p1, e);
+        this.controls.target.lerpVectors(t0, t1, e);
       },
     });
   }
 
-  /** 低性能降级：关闭辉光、降低像素比 */
+  /** 相机推拉（拆解时后拉让出空间） */
+  zoom(factor, tweens, duration = 1.2) {
+    const target = this.controls.target.clone();
+    const p0 = this.camera.position.clone();
+    const dir = p0.clone().sub(target);
+    const d0 = dir.length();
+    const d1 = this._fit.dist * factor;
+    if (d0 < 1e-3) return;
+    dir.normalize();
+    this.controls.minDistance = Math.min(this.controls.minDistance, d1 * 0.9);
+    tweens.add({
+      tag: 'zoom',
+      duration,
+      ease: 'inOutCubic',
+      onUpdate: (_r, e) => {
+        this.camera.position.copy(target).addScaledVector(dir, d0 + (d1 - d0) * e);
+      },
+    });
+  }
+
+  /** 低性能降级：像素比降到 1 */
   degrade() {
     if (this.degraded) return;
     this.degraded = true;
-    this.bloom.enabled = false;
     this.renderer.setPixelRatio(1);
-    this.composer.setPixelRatio(1);
     this.resize();
-    console.info('[Render] 检测到低帧率，已自动降级（关闭辉光 / 像素比 1）');
+    console.info('[Render] 检测到低帧率，已自动降级（像素比 1）');
   }
 
   resize() {
@@ -173,19 +235,30 @@ export class SceneManager {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
-    this.composer.setSize(w, h);
-    this.bloom.setSize(w, h);
+    this.edge.setSize(w, h, this.renderer.getPixelRatio());
+    this.edge.sync(this.camera);
+    const st = this._stageRect();
+    this.edge.setBand(st.left / w, (st.left + st.width) / w);
   }
 
-  /** 每帧渲染 */
-  render() {
+  /**
+   * 每帧渲染
+   * @param {object} opts { armorRoot, highlight, hide }
+   */
+  render(opts = {}) {
     this.controls.update();
-    this.composer.render();
+    this.edge.setTime(this.time);
+    this.edge.render(this.scene, this.camera, {
+      hide: [this.stageGroup, ...(opts.hide || [])],
+      armorRoot: opts.armorRoot,
+      highlight: opts.highlight,
+    });
   }
 
   dispose() {
     window.removeEventListener('resize', this._onResize);
     this.controls.dispose();
+    this.edge.dispose();
     this.renderer.dispose();
   }
 }

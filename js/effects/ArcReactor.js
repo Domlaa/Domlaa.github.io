@@ -5,7 +5,6 @@
  * 作为一个独立模块挂载到 ArmorModel 的模块管理体系（可选中、可拆解、可显隐）。
  */
 import * as THREE from 'three';
-import { HolographicMaterial, WireMaterial } from '../materials/HolographicMaterial.js';
 
 export class ArcReactor {
   /**
@@ -17,8 +16,7 @@ export class ArcReactor {
       name: 'ARC REACTOR',
       cn: '能量核心',
     };
-    const mat = new HolographicMaterial('reactor');
-    this.material = mat;
+    this.material = null;
     this.def = {
       id: 'reactor',
       region: null,
@@ -124,15 +122,11 @@ export class ArcReactor {
   update(dt, time) {
     const pulse = 0.75 + 0.25 * Math.sin(time * 2.6);
     const burst = Math.pow(0.5 + 0.5 * Math.sin(time * 0.9), 8) * 0.6; // 周期性爆发
-    const glowScale = 0.16 + 0.05 * pulse + burst * 0.12;
+    const glowScale = 0.13 + 0.04 * pulse + burst * 0.08;
     this.glow.scale.setScalar(glowScale);
-    this.glow.material.opacity = 0.55 + 0.3 * pulse;
-    this.light.intensity = 1.8 + 1.2 * pulse + burst * 4;
+    this.glow.material.opacity = 0.42 + 0.22 * pulse;
+    this.light.intensity = 0.30 + 0.20 * pulse + 0.7 * burst;
 
-    if (this.material) {
-      this.material.setHighlight(this.hoverT, this.selectT);
-      this.material.setReveal(this.revealT);
-    }
     // 选中时外环旋转
     this.pivot.children.forEach((c) => {
       if (c.geometry && c.geometry.type === 'RingGeometry') c.rotation.z += dt * (this.selectT > 0.5 ? 2.0 : 0.4);
