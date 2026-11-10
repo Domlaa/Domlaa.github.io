@@ -445,19 +445,20 @@
   .cm-status b.acc { color: var(--gold); }
 
   .telemetry {
-    position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
-    display: flex; z-index: 6; border: 1px solid rgba(236, 247, 251, .26);
-    background-color: rgba(6, 19, 26, .34);
-    background-image: linear-gradient(180deg, rgba(255, 255, 255, .10), transparent 60%);
-    -webkit-backdrop-filter: blur(16px) saturate(160%);
-    backdrop-filter: blur(16px) saturate(160%);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), 0 12px 30px -22px #000;
+    position: absolute; left: 16px; top: 34px; z-index: 6;
+    display: flex; pointer-events: none;
+    padding: 5px 10px;
+    background: rgba(6, 19, 26, .28);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    border: 1px solid rgba(236, 247, 251, .14);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12);
   }
   .telemetry > div {
-    display: flex; flex-direction: column; gap: 4px; padding: 7px 13px;
-    border-left: 1px solid var(--line); min-width: 84px;
+    display: flex; flex-direction: column; gap: 3px; padding: 0 10px;
+    border-left: 1px solid rgba(228, 243, 248, .16);
   }
-  .telemetry > div:first-child { border-left: 0; }
+  .telemetry > div:first-child { border-left: 0; padding-left: 0; }
+  .telemetry > div:last-child { padding-right: 0; }
   .telemetry div { font: 7.5px/1 var(--mono); letter-spacing: .18em; color: var(--dim); text-transform: uppercase; }
   .telemetry b { font: 500 10px/1 var(--mono); letter-spacing: .06em; color: #E9FBFF; }
   .telemetry b.warn { color: var(--gold); }
@@ -470,6 +471,21 @@
     -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16);
   }
+
+  /* 面板显隐开关：右下角、DRAG 提示上方，样式与 drag-hint 一致 */
+  .panel-toggle {
+    position: absolute; right: 16px; bottom: 46px; z-index: 7;
+    appearance: none; cursor: pointer;
+    font: 7.5px/1 var(--mono); letter-spacing: .2em; color: rgba(150, 200, 218, .9);
+    text-transform: uppercase;
+    border: 1px solid rgba(236, 247, 251, .22); padding: 5px 8px;
+    background: rgba(6, 19, 26, .30);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16);
+    transition: color .2s, border-color .2s, background .2s;
+  }
+  .panel-toggle:hover { color: #E9FAFF; border-color: rgba(236, 247, 251, .5); background: rgba(20, 40, 52, .4); }
+  .panel-toggle.dim { opacity: .55; }
 
   /* callout annotations */
   .callout-label {
@@ -656,6 +672,7 @@
     .panel { padding: 10px 12px 11px; }
     .read { margin-bottom: 9px; }
     .zone { width: 56px; }
+    .telemetry > div:nth-child(n+4) { display: none; }
   }
   @media (max-width: 1100px) {
     .hud-root { grid-template-columns: 196px minmax(0, 1fr) 196px; }
@@ -664,9 +681,9 @@
     .tape { display: none; }
     .cm-status { display: none; }
     .target-label { max-width: calc(100% - 40px); }
-    .telemetry > div { min-width: 66px; padding: 6px 9px; }
     .telemetry > div:nth-child(n+3) { display: none; }
     .drag-hint { display: none; }
+    .panel-toggle { display: none; }
   }
   @media (max-height: 780px) {
     .hud-root { grid-template-rows: 54px minmax(0, 1fr) 136px; }
@@ -797,7 +814,7 @@
 
       <div class="ring-ticks"><span></span></div>
 
-      <iframe id="armor-frame" src="mk7.html?embed=1&solid=1&panel=1&bg=1&line=1&auto=1&fit=1.2&model=model/tiny/irobny2_optimized.glb" title="MK VII 结构线稿装甲 · 压缩模型" scrolling="no" tabindex="-1"></iframe>
+      <iframe id="armor-frame" src="mk7.html?embed=1&solid=1&panel=1&bg=1&line=1&auto=1&fit=1.2&skin=hud&model=model/tiny/irobny2_optimized.glb" title="MK VII wireframe armor" scrolling="no" tabindex="-1"></iframe>
 
       <div class="reticle"><span class="rh"></span><span class="rv"></span><span class="rc"></span></div>
       <div class="edge-ruler l"></div>
@@ -809,12 +826,6 @@
 
       <div class="target-label">HOLOGRAPHIC · MK VII</div>
 
-      <div class="cm-status">
-        <span>PROJ<b>ACTIVE</b></span>
-        <span>LINE<b>Structural</b></span>
-        <span>MODEL<b>MK VII · Lite</b></span>
-      </div>
-
       <div class="telemetry">
         <div>DIST<b>347 m</b></div>
         <div>REL VEL<b>22 m/s</b></div>
@@ -822,7 +833,14 @@
         <div>REC WPn<b>REPULSOR</b></div>
       </div>
 
+      <div class="cm-status">
+        <span>PROJ<b>ACTIVE</b></span>
+        <span>LINE<b>Structural</b></span>
+        <span>MODEL<b>MK VII · Lite</b></span>
+      </div>
+
       <div class="drag-hint">Drag to rotate</div>
+      <button class="panel-toggle" id="panel-toggle" type="button" title="Show / hide armor controls">HIDE PANEL</button>
     </section>
   </main>
 
@@ -926,6 +944,7 @@
 (function () {
   var fr = document.getElementById('armor-frame');
   var lh = document.getElementById('loading');
+  var btn = document.getElementById('panel-toggle');
   function show() {
     fr.classList.add('on');
     if (lh) lh.style.display = 'none';
@@ -940,6 +959,18 @@
     } catch (e) {}
   }, 1000);
   setTimeout(function () { clearInterval(t); }, 25000);
+
+  // 控制面板显隐：通过嵌入页暴露的 setPanelVisible 切换
+  if (btn) {
+    btn.addEventListener('click', function () {
+      var MK7 = null;
+      try { MK7 = fr.contentWindow.__MK7; } catch (e) {}
+      if (!MK7 || !MK7.setPanelVisible) return;
+      var vis = MK7.setPanelVisible(!MK7.state.panelVisible);
+      btn.textContent = vis ? 'HIDE PANEL' : 'SHOW PANEL';
+      btn.classList.toggle('dim', !vis);
+    });
+  }
 })();
 </script>
 <script>

@@ -86,7 +86,8 @@ const $ = (id) => document.getElementById(id);
      panel=1  显示底部控制面板（旋转 / 线条 / 流光 / 背景 / 配色等）
      bg=1     开启 3D 空间背景（光柱 / 粒子 / 环 / 地面网格）
      line=1   默认「仅线条」模式（无表面纹理；面板按钮可切回）
-     auto=1   默认自动旋转 */
+     auto=1   默认自动旋转
+     skin=hud 面板皮肤适配 ironman-hud 诊断页：右下角玻璃条、英文标签、降低存在感 */
 const EMBED_QS = new URLSearchParams(location.search);
 const EMBED = EMBED_QS.has('embed');
 if (EMBED) {
@@ -98,6 +99,32 @@ if (EMBED) {
   state.jarvis = false;
   document.body.classList.add('embed');
   if (state.embedPanel) document.body.classList.add('embed-panel');
+  if (EMBED_QS.get('skin') === 'hud') document.body.classList.add('skin-hud');
+}
+
+/* skin=hud：面板文案换成英文（宿主 ironman-hud 是全英文界面）。
+   只在嵌入+该皮肤下生效，mk7.html 主页与 mk7-console 不受影响。 */
+if (document.body.classList.contains('skin-hud')) {
+  const EN = {
+    'btn-rotate': ['ROTATE', 'Auto-rotate (Space)'],
+    'btn-lineonly': ['LINES', 'Lines only, hide surface (O)'],
+    'btn-split': ['SPLIT', 'Detach / assemble armor (E)'],
+    'btn-flow': ['FLOW', 'Line flow pulse (G)'],
+    'btn-bg': ['SPACE', '3D spatial backdrop (B)'],
+    'btn-invert': ['DIM', 'Dim / bright lines (L)'],
+    'btn-reset': ['RESET', 'Reset view (R)'],
+  };
+  for (const [id, [label, title]] of Object.entries(EN)) {
+    const b = document.getElementById(id);
+    if (b) { b.textContent = label; b.title = title; }
+  }
+  const SL = { 'rg-strength': 'GLOW', 'rg-width': 'WIDTH', 'rg-surface': 'SURFACE' };
+  for (const [id, label] of Object.entries(SL)) {
+    const input = document.getElementById(id);
+    const span = input && input.parentElement.querySelector('span');
+    if (span) span.textContent = label;
+    if (input && input.parentElement) input.parentElement.title = label.toLowerCase() + ' control';
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1105,4 +1132,13 @@ if (EMBED && EMBED_QS.get('line') === '1') setLineOnly(true);
 boot().then(() => { if (state.ready) tick(); });
 
 // 测试钩子
-window.__MK7 = { THREE, scene, camera, renderer, controls, edgeMat, CONFIG, state, bgFx, get model() { return model; }, resetView, capture };
+window.__MK7 = { THREE, scene, camera, renderer, controls, edgeMat, CONFIG, state, bgFx, get model() { return model; }, resetView, capture, setPanelVisible };
+
+/** 宿主页开关嵌入面板（skin=hud 场景下由 ironman-hud 的按钮调用）。返回切换后的可见状态。 */
+function setPanelVisible(v) {
+  const off = v === false;
+  document.body.classList.toggle('panel-off', off);
+  state.panelVisible = !off;
+  return state.panelVisible;
+}
+state.panelVisible = true;

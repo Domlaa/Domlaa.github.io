@@ -165,6 +165,62 @@ body.embed.embed-panel .tb-sliders { padding-left: 5px; gap: 0; }
 body.embed.embed-panel .slider { padding: 0 5px; font-size: 9.5px; gap: 5px; }
 body.embed.embed-panel .slider input[type="range"] { width: 56px; }
 body.embed.embed-panel .picker { padding: 0 4px; }
+
+/* ---------- skin=hud：宿主是 ironman-hud 全息诊断页 ----------
+   面板不再横居中，改为右下角低调玻璃条：与诊断页的青白玻璃 / 等宽字一致，
+   平时半透明，悬停才提亮；宿主可通过 __MK7.setPanelVisible() 整体隐藏。 */
+body.embed.embed-panel.skin-hud .toolbar {
+  left: auto; right: 8px; transform: none;
+  bottom: 8px;
+  /* 两行紧凑小部件：上排按钮、下排滑条，整体靠右下，不再是横贯整幅的长条 */
+  flex-direction: column; align-items: flex-end; gap: 3px;
+  max-width: min(400px, calc(100% - 16px));
+  border-radius: 3px;
+  padding: 4px 5px;
+  background: rgba(6, 19, 26, .30);
+  border-color: rgba(236, 247, 251, .22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .15), 0 10px 26px -18px #000;
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  backdrop-filter: blur(14px) saturate(150%);
+  opacity: .55;
+  transition: opacity .3s ease;
+}
+body.embed.embed-panel.skin-hud .toolbar:hover,
+body.embed.embed-panel.skin-hud .toolbar:focus-within { opacity: 1; }
+body.embed.embed-panel.skin-hud .toolbar button {
+  font-family: var(--mono);
+  font-size: 9px; letter-spacing: .14em; text-transform: uppercase;
+  color: rgba(228, 243, 248, .72);
+  padding: 5px 7px; border-radius: 2px;
+}
+body.embed.embed-panel.skin-hud .toolbar button:hover {
+  color: #E9FAFF; background: rgba(228, 243, 248, .14);
+}
+/* 激活态：诊断页的「白印章」样式，不用 mk7 主页的金色 */
+body.embed.embed-panel.skin-hud .toolbar button.on {
+  color: #0B1014; background: rgba(244, 251, 253, .92); border-color: transparent;
+  box-shadow: 0 0 10px rgba(228, 243, 248, .3); font-weight: 600;
+}
+body.embed.embed-panel.skin-hud .tb-row { flex-wrap: nowrap; gap: 2px; }
+body.embed.embed-panel.skin-hud .tb-sliders {
+  border-left: 0; padding-left: 0; padding-top: 3px; gap: 0;
+  border-top: 1px solid rgba(228, 243, 248, .12);
+}
+body.embed.embed-panel.skin-hud .slider {
+  font-family: var(--mono); font-size: 8px; letter-spacing: .14em;
+  text-transform: uppercase; color: rgba(150, 180, 194, .9);
+  padding: 0 6px; gap: 4px;
+}
+body.embed.embed-panel.skin-hud .slider input[type="range"] { width: 44px; }
+body.embed.embed-panel.skin-hud .slider input[type="range"]::-webkit-slider-thumb {
+  background: #DFF2FA; box-shadow: 0 0 7px rgba(228, 243, 248, .55);
+}
+body.embed.embed-panel.skin-hud .picker { padding: 0 3px; }
+body.embed.embed-panel.skin-hud .picker input[type="color"] {
+  width: 14px; height: 14px; border-color: rgba(236, 247, 251, .4);
+}
+/* 宿主面板隐藏开关：整体收起 */
+body.embed.panel-off .toolbar { display: none !important; }
 /* 宿主 iframe 在窄屏更窄（桌面约 807px，1024 屏约 556px）：
    丢掉滑条，按钮保持紧凑单行 —— 否则会命中 mk7 的手机端 3 列网格，按钮被拉大盖住装甲 */
 @media (max-width: 720px) {
