@@ -146,6 +146,34 @@ body.embed .error,
 body.embed .vignette,
 body.embed #jarvis,
 body.embed #jarvisveil { display: none !important; }
+
+/* 带控制面板的嵌入（ironman-hud 诊断页用）：只恢复工具栏，
+   其余 HUD（标题/统计/暗角/贾维斯）保持隐藏；贾维斯按钮一并隐藏
+   （其 iframe 在 embed 下被强制隐藏，开了也看不见）。
+   宿主 iframe 只有 ~800px 宽，去掉截图/全屏并压缩按钮与滑条，保证三条滑条都在。 */
+body.embed.embed-panel .toolbar {
+  display: flex !important;
+  gap: 4px; padding: 5px 6px; max-width: calc(100% - 16px);
+  bottom: 10px;
+}
+body.embed.embed-panel #btn-jarvis,
+body.embed.embed-panel #btn-shot,
+body.embed.embed-panel #btn-full { display: none; }
+body.embed.embed-panel .tb-row { gap: 3px; }
+body.embed.embed-panel .toolbar button { font-size: 11px; padding: 7px 10px; letter-spacing: .02em; }
+body.embed.embed-panel .tb-sliders { padding-left: 5px; gap: 0; }
+body.embed.embed-panel .slider { padding: 0 5px; font-size: 9.5px; gap: 5px; }
+body.embed.embed-panel .slider input[type="range"] { width: 56px; }
+body.embed.embed-panel .picker { padding: 0 4px; }
+/* 宿主 iframe 在窄屏更窄（桌面约 807px，1024 屏约 556px）：
+   丢掉滑条，按钮保持紧凑单行 —— 否则会命中 mk7 的手机端 3 列网格，按钮被拉大盖住装甲 */
+@media (max-width: 720px) {
+  body.embed.embed-panel .toolbar { flex-wrap: nowrap; gap: 2px; padding: 4px 5px; }
+  body.embed.embed-panel .tb-row { display: flex; flex-wrap: nowrap; gap: 2px; }
+  body.embed.embed-panel .tb-sliders { display: none; }
+  body.embed.embed-panel .toolbar button { font-size: 10px; padding: 6px 7px; letter-spacing: 0; }
+  body.embed.embed-panel .picker { padding: 0 2px; }
+}
 .slider input[type="range"]:disabled::-webkit-slider-thumb { box-shadow: none; }
 .slider input[type="range"]::-moz-range-track { height: 2px; background: rgba(255, 255, 255, .18); }
 .slider input[type="range"]::-moz-range-thumb {

@@ -74,20 +74,30 @@ const state = {
   zoomAnim: null,       // 拆/合时的相机后拉补间
   fit: { dist: 4, targetY: 1 },
   dragging: false,
+  embed: false,         // ?embed=1：作为 iframe 嵌入宿主页
+  embedPanel: false,    // embed+panel=1：显示底部控制面板（取景留出工具栏安全区）
 };
 
 const $ = (id) => document.getElementById(id);
 
-/* ?embed=1 嵌入模式：被宿主页（如 mk7-console.html 的 haloflux 控制台）以 iframe 引用。
-   只渲染装甲本体：透明背景、无 HUD、无 3D/贾维斯背景层。 */
-const EMBED = new URLSearchParams(location.search).has('embed');
+/* ?embed=1 嵌入模式：被宿主页（mk7-console / ironman-hud）以 iframe 引用。
+   默认只渲染装甲本体：透明背景、无 HUD、无 3D/贾维斯背景层、不自动旋转。
+   可选参数（ironman-hud 的诊断投影用）：
+     panel=1  显示底部控制面板（旋转 / 线条 / 流光 / 背景 / 配色等）
+     bg=1     开启 3D 空间背景（光柱 / 粒子 / 环 / 地面网格）
+     line=1   默认「仅线条」模式（无表面纹理；面板按钮可切回）
+     auto=1   默认自动旋转 */
+const EMBED_QS = new URLSearchParams(location.search);
+const EMBED = EMBED_QS.has('embed');
 if (EMBED) {
   state.embed = true;
-  state.bg = false;
-  state.auto = false;   // 嵌入时不自动转，正对观众（仍可拖拽旋转）
+  state.bg = EMBED_QS.get('bg') === '1';
+  state.embedPanel = EMBED_QS.get('panel') === '1';
+  state.auto = EMBED_QS.get('auto') === '1';
   state.jarvisWant = false;
   state.jarvis = false;
   document.body.classList.add('embed');
+  if (state.embedPanel) document.body.classList.add('embed-panel');
 }
 
 /* ------------------------------------------------------------------ */
@@ -368,7 +378,9 @@ const edgeMat = new THREE.ShaderMaterial({
     uLineColor: { value: new THREE.Color(state.lineColor) },
     uTime: { value: 0 },
     uFlow: { value: 0.9 },
-    uTransparent: { value: EMBED ? 1 : 0 },
+    // embed 默认透明输出（只取装甲本体）；solid=1 时不透明输出，
+    // 这样加色混合的 3D 背景才有 alpha 可透出 —— 宿主用 mix-blend-mode:screen 把黑底筛掉。
+    uTransparent: { value: EMBED && EMBED_QS.get('solid') !== '1' ? 1 : 0 },
     uNear: { value: camera.near },
     uFar: { value: camera.far },
   },
@@ -540,8 +552,8 @@ function frameCamera(height) {
   state.fit.dist = d;
 
   const vh = innerHeight || 900;
-  if (state.embed) {
-    // 嵌入模式：iframe 视口即取景框，装甲完整占满，不留 HUD 安全区
+  if (state.embed && !state.embedPanel) {
+    // 纯嵌入（无控制面板）：iframe 视口即取景框，装甲完整占满，不留安全区
     state.fit.targetY = height * 0.5;
   } else {
     const safeTop = narrow ? 120 : CONFIG.safeTop;
@@ -1088,6 +1100,8 @@ function initUI() {
 
 /* ------------------------------------------------------------------ */
 initUI();
+// 嵌入参数 line=1：进入「仅线条」并同步按钮与表面滑条
+if (EMBED && EMBED_QS.get('line') === '1') setLineOnly(true);
 boot().then(() => { if (state.ready) tick(); });
 
 // 测试钩子

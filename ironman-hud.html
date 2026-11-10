@@ -384,10 +384,13 @@
 
   /* MK7 装甲层：透明 iframe 引用 mk7.html?embed=1（结构线稿渲染），就绪后淡入 */
   #armor-frame {
-    position: absolute; left: 3%; right: 3%; top: 3%; bottom: 8%;
-    width: 94%; height: 89%;
+    position: absolute; left: 3%; right: 3%; top: 3%; bottom: 13%;
+    width: 94%; height: 84%;
     border: 0; background: transparent; z-index: 3; display: block;
     opacity: 0; transition: opacity .8s ease .1s;
+    /* 嵌入页用 solid=1 不透明输出（3D 背景的加色元素才有 alpha）：
+       screen 混合把深色底筛成透明，光柱 / 地面网格 / 线稿叠加到 HUD 玻璃上 */
+    mix-blend-mode: screen;
   }
   #armor-frame.on { opacity: 1; }
 
@@ -794,7 +797,7 @@
 
       <div class="ring-ticks"><span></span></div>
 
-      <iframe id="armor-frame" src="mk7.html?embed=1" title="MK VII 结构线稿装甲" scrolling="no" tabindex="-1"></iframe>
+      <iframe id="armor-frame" src="mk7.html?embed=1&solid=1&panel=1&bg=1&line=1&auto=1&fit=1.2&model=model/tiny/irobny2_optimized.glb" title="MK VII 结构线稿装甲 · 压缩模型" scrolling="no" tabindex="-1"></iframe>
 
       <div class="reticle"><span class="rh"></span><span class="rv"></span><span class="rc"></span></div>
       <div class="edge-ruler l"></div>
@@ -804,12 +807,12 @@
 
       <div id="loading">PROJECTION INITIALIZING…</div>
 
-      <div class="target-label">Holographic projection / MK VII</div>
+      <div class="target-label">HOLOGRAPHIC · MK VII</div>
 
       <div class="cm-status">
         <span>PROJ<b>ACTIVE</b></span>
-        <span>LATTICE<b>Structural Lines</b></span>
-        <span>MODEL<b>MK VII · Wireframe</b></span>
+        <span>LINE<b>Structural</b></span>
+        <span>MODEL<b>MK VII · Lite</b></span>
       </div>
 
       <div class="telemetry">
