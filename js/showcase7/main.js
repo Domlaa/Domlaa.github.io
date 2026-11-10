@@ -220,8 +220,18 @@ const bgFx = {
   group: new THREE.Group(),
   uTime: { value: 0 },
   uColor: { value: new THREE.Color(state.lineColor) },  // 随线条颜色联动
+  // 扫描环主色：冷青（固定色彩个性），syncBgColor 里再掺 30% 线色跟随自定义
+  uTrail: { value: new THREE.Color(0x38D8FF) },
   rings: [],
 };
+
+/** 线条颜色 → 背景：本体取线色；扫描环尾迹以冷青为主色（固定的色彩个性），
+    只掺入 30% 线色以便跟随自定义色，避免默认白线时整环退回纯白 */
+function syncBgColor() {
+  const c = new THREE.Color(state.lineColor);
+  bgFx.uColor.value.copy(c);
+  bgFx.uTrail.value.copy(new THREE.Color(0x38D8FF)).lerp(c, 0.3);
+}
 
 (function buildBackground() {
   const g = bgFx.group;
@@ -330,27 +340,52 @@ const bgFx = {
   }
 
   // 4) 垂直扫描环：水平光环沿 Y 轴上下往返（余弦驱动 → 自带缓入缓出）
+  //    能量扫描造型：运动前沿白热窄核 + 尾迹衰减成线色（单色相渐变，色相跟随取色器）；
+  //    折返点速度为零时白热核自动熄灭，退化成对称柔光
   {
-    const ringGeo = new THREE.CylinderGeometry(1.18, 1.18, 0.55, 96, 1, true);
+    // 高度 0.13：细扫描线但留有足够像素展示「白热→冷青」的渐变层次
+    const ringGeo = new THREE.CylinderGeometry(1.18, 1.18, 0.13, 128, 1, true);
     const mkRing = (bright, dashes) => new THREE.Mesh(ringGeo, new THREE.ShaderMaterial({
-      uniforms: { uColor: bgFx.uColor, uBright: { value: bright }, uDash: { value: dashes } },
+      uniforms: {
+        uColor: bgFx.uColor, uTrail: bgFx.uTrail,
+        uBright: { value: bright }, uDash: { value: dashes },
+        uDir: { value: 1 },    // 运动方向：+1 上行 / -1 下行（tick 里按速度符号更新）
+        uHot: { value: 0.8 },  // 白热强度 ∝ |速度|，折返时归零
+      },
       vertexShader: /* glsl */`
         varying vec2 vUv;
-        void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        varying float vFace;
+        void main() {
+          vUv = uv;
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          vec3 n = normalize(normalMatrix * normal);
+          // 掠射角淡出：只在「正对镜头」的那段圆弧上发光，
+          // 否则从下方看圆柱内壁会糊成一整片大盘
+          vFace = abs(dot(normalize(-mv.xyz), n));
+          gl_Position = projectionMatrix * mv;
+        }`,
       fragmentShader: /* glsl */`
         precision highp float;
         varying vec2 vUv;
-        uniform vec3 uColor;
-        uniform float uBright, uDash;
+        varying float vFace;
+        uniform vec3 uColor, uTrail;
+        uniform float uBright, uDash, uDir, uHot;
         void main() {
-          float band = pow(1.0 - abs(vUv.y - 0.5) * 2.0, 2.6);            // 竖向亮核
-          float dash = 0.7 + 0.3 * sin(vUv.x * 6.2832 * 90.0);            // 细刻度纹理
-          gl_FragColor = vec4(uColor * band * mix(1.0, dash, uDash) * uBright, 0.0);
+          // b = 距运动前沿的归一化距离（0 = 前沿，1 = 尾端），随 uDir 翻转
+          float b = mix(vUv.y, 1.0 - vUv.y, step(0.0, uDir));
+          float core  = exp(-b * b * 90.0);                     // 白热核心：极窄的一条线
+          float glow  = exp(-b * 2.2);                          // 冷色辉光：铺满整条带
+          float band  = core * 0.9 + glow * 0.42;
+          float dash  = 0.72 + 0.28 * sin(vUv.x * 6.2832 * 90.0); // 细刻度纹理
+          // 环体自始至终保持冷青色相，只有核心那一条烧到白热
+          vec3 col = mix(uTrail, vec3(1.0), clamp(core * uHot, 0.0, 1.0) * 0.75);
+          float face = smoothstep(0.10, 0.55, vFace);
+          gl_FragColor = vec4(col * band * mix(1.0, dash, uDash) * uBright * face, 0.0);
         }`,
       transparent: true, depthWrite: false, side: THREE.DoubleSide, ...PURE_ADD,
     }));
-    const r1 = mkRing(0.85, 1.0);   // 主环：带刻度
-    const r2 = mkRing(0.30, 0.0);   // 副环：无刻度、错相慢速
+    const r1 = mkRing(0.92, 1.0);   // 主环：带刻度
+    const r2 = mkRing(0.36, 0.0);   // 副环：无刻度、错相慢速
     g.add(r1, r2);
     bgFx.rings.push(
       { mesh: r1, min: 0.05, max: 1.98, speed: 0.85, phase: 0 },
@@ -437,12 +472,19 @@ const edgeMat = new THREE.ShaderMaterial({
 
     void main() {
       vec2 o = uTexel * uThickness;
-      vec3 col = texture2D(tColor, vUv).rgb;
+      vec4 src = texture2D(tColor, vUv);
+      vec3 col = src.rgb;
 
       // 表面控制：去饱和 + 压暗（0 = 纯线稿底色，1 = 原样）
+      // 取景背景（扫描环等）是发光彩色元素，若一并去色会变成一片灰白。
+      // 只对「背景像素」（颜色 alpha≈0，装甲写 1）按色度保留，战甲表面仍被压成线稿。
       {
         float g = dot(col, vec3(0.2126, 0.7152, 0.0722));
-        col = mix(vec3(g), col, uSurface) * mix(0.16, 1.0, uSurface);
+        float chroma = length(col - vec3(g));
+        float bgMask = 1.0 - clamp(src.a, 0.0, 1.0);
+        float keep = smoothstep(0.035, 0.12, chroma) * bgMask * 0.9;
+        float s = max(uSurface, keep);
+        col = mix(vec3(g), col, s) * mix(0.16, 1.0, s);
       }
 
       // 法线边缘
@@ -804,7 +846,12 @@ function tick() {
   if (state.bg) {
     bgFx.uTime.value = state.time;
     for (const r of bgFx.rings) {
-      r.mesh.position.y = r.min + (r.max - r.min) * (0.5 - 0.5 * Math.cos(state.time * r.speed + r.phase));
+      const w = state.time * r.speed + r.phase;
+      r.mesh.position.y = r.min + (r.max - r.min) * (0.5 - 0.5 * Math.cos(w));
+      // 扫描环能量渐变：前沿朝向 = 运动方向；白热强度 ∝ |速度|（折返时熄灭成对称柔光）
+      const vel = Math.sin(w);
+      r.mesh.material.uniforms.uDir.value = vel >= 0 ? 1 : -1;
+      r.mesh.material.uniforms.uHot.value = Math.min(1, Math.abs(vel) * 1.4);
     }
   }
 
@@ -1094,7 +1141,7 @@ function initUI() {
   $('in-color').addEventListener('input', (e) => {
     state.lineColor = e.target.value;
     edgeMat.uniforms.uLineColor.value.set(state.lineColor);
-    bgFx.uColor.value.set(state.lineColor);   // 背景色随线条颜色联动
+    syncBgColor();   // 背景（含扫描环尾迹色）随线条颜色联动
   });
   $('btn-reset').addEventListener('click', resetView);
   $('btn-shot').addEventListener('click', capture);
@@ -1131,6 +1178,7 @@ function initUI() {
 
 /* ------------------------------------------------------------------ */
 initUI();
+syncBgColor();   // 初始化扫描环尾迹派生色（默认线色下也能拉出冷—白层次）
 // 嵌入参数 line=1：进入「仅线条」并同步按钮与表面滑条
 if (EMBED && EMBED_QS.get('line') === '1') setLineOnly(true);
 boot().then(() => { if (state.ready) tick(); });
