@@ -310,6 +310,24 @@ body {
 }
 .boot-log { margin-top: 13px; font-size: 9px; letter-spacing: .26em; color: var(--cyan-dim); }
 
+/* 启动失败 / 超时诊断 */
+.boot.stall .boot-bar i { background: #ff6b6b; box-shadow: 0 0 14px #ff6b6b; right: 0 !important; }
+.boot-diag {
+  display: none; max-width: 460px; margin: 16px auto 0; padding: 10px 12px;
+  font-family: var(--mono); font-size: 10px; line-height: 1.7; letter-spacing: .04em;
+  color: #ffb3b3; text-align: left; word-break: break-all; white-space: pre-line;
+  border: 1px solid rgba(255, 107, 107, .38); background: rgba(255, 107, 107, .07);
+}
+.boot-diag.on { display: block; }
+.boot-retry {
+  margin: 16px auto 0; padding: 8px 18px; display: block;
+  font-family: var(--mono); font-size: 10px; letter-spacing: .22em; cursor: pointer;
+  color: var(--cyan-bright); background: rgba(125, 232, 255, .08);
+  border: 1px solid rgba(125, 232, 255, .4); transition: background .2s, box-shadow .2s;
+}
+.boot-retry:hover { background: rgba(125, 232, 255, .18); box-shadow: 0 0 18px rgba(125, 232, 255, .25); }
+.boot-retry.hidden { display: none; }
+
 /* ---------- 响应式 ---------- */
 @media (max-width: 1240px) {
   .hud { grid-template-columns: 224px minmax(0, 1fr) 224px; }

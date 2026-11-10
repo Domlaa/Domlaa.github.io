@@ -15,6 +15,46 @@
   }
 }
 </script>
+
+<!-- 启动诊断：模块解析失败（典型是浏览器缓存了旧 JS，import 到已删除的文件）时，
+     浏览器只会把错误写进 Console，启动画面会静默卡死。这里把原因显示到页面上。 -->
+<script>
+(function () {
+  var shown = false;
+  function diag(msg) {
+    if (shown) return;
+    shown = true;
+    var el = document.getElementById('boot-diag');
+    if (el) { el.textContent = String(msg).slice(0, 300); el.classList.add('on'); }
+    var boot = document.getElementById('boot');
+    if (boot) { boot.classList.remove('fade'); boot.classList.add('stall'); }
+    var btn = document.getElementById('boot-retry');
+    if (btn) btn.classList.remove('hidden');
+  }
+  window.__BOOT_DIAG = diag;
+  // 捕获阶段监听：模块脚本 404 / MIME 错误只会触发资源 error 事件，没有 message
+  window.addEventListener('error', function (e) {
+    var t = e && e.target;
+    if (t && t !== window && (t.src || t.href)) {
+      diag('资源加载失败\n' + (t.src || t.href) + '\n通常是模块 404 或浏览器缓存了旧版 JS，点下方「强制重载」。');
+      return;
+    }
+    diag((e && e.message) || '脚本错误（详见 Console）');
+  }, true);
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e && e.reason;
+    diag('未处理的 Promise 拒绝：' + ((r && (r.message || r)) || '未知'));
+  });
+  // 兜底：主模块若完全没执行（旧缓存导致模块图断裂），20 秒后提示原因
+  setTimeout(function () {
+    if (window.__BOOT_READY) return;
+    var stage = window.__BOOT_STAGE;
+    diag(stage
+      ? '启动超时 20s：卡在「' + stage + '」阶段 → 详见 Console'
+      : '启动超时 20s：模块未执行，通常是浏览器缓存了旧版 JS → 点下方强制重载');
+  }, 20000);
+})();
+</script>
 </head>
 <body>
   <canvas id="stage"></canvas>
@@ -149,6 +189,9 @@
       <div class="boot-sub">HOLOGRAPHIC DECONSTRUCTION · MARK XLIV HULK BUSTER</div>
       <div class="boot-bar"><i id="boot-bar"></i></div>
       <div class="boot-log" id="boot-log">INITIALIZING…</div>
+      <div class="boot-diag" id="boot-diag"></div>
+      <button class="boot-retry hidden" id="boot-retry"
+              onclick="location.replace(location.pathname + '?r=' + Date.now())">强制重载 FORCE RELOAD</button>
     </div>
   </div>
   <div id="webgl-error" class="boot hidden">

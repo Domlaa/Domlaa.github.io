@@ -21,6 +21,7 @@ const bootLog = $('boot-log');
 const bootBar = $('boot-bar');
 function log(msg, progress) {
   bootLog.textContent = msg;
+  window.__BOOT_STAGE = msg;                 // 供 index.html 的超时诊断读取
   if (progress !== undefined) bootBar.style.right = `${Math.round((1 - progress) * 100)}%`;
 }
 
@@ -44,6 +45,7 @@ async function boot() {
   } catch (err) {
     console.error('[Armor] 模型加载失败:', err);
     log('MODEL LOAD FAILED — SEE CONSOLE', 1);
+    window.__BOOT_DIAG?.(`模型加载失败：${err?.message || err}`);
     return;
   }
 
@@ -116,6 +118,7 @@ async function boot() {
   edge.setWipe(0);
 
   setTimeout(() => {
+    window.__BOOT_READY = true;              // 关掉 index.html 里的超时诊断
     const bootEl = $('boot');
     bootEl.classList.add('fade');
     setTimeout(() => bootEl.remove(), 900);
