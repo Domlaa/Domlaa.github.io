@@ -90,6 +90,7 @@ const $ = (id) => document.getElementById(id);
      skin=hud 面板皮肤适配 ironman-hud 诊断页：右下角玻璃条、英文标签、降低存在感 */
 const EMBED_QS = new URLSearchParams(location.search);
 const EMBED = EMBED_QS.has('embed');
+const SKIN_HUD = EMBED_QS.get('skin') === 'hud';
 if (EMBED) {
   state.embed = true;
   state.bg = EMBED_QS.get('bg') === '1';
@@ -99,7 +100,7 @@ if (EMBED) {
   state.jarvis = false;
   document.body.classList.add('embed');
   if (state.embedPanel) document.body.classList.add('embed-panel');
-  if (EMBED_QS.get('skin') === 'hud') document.body.classList.add('skin-hud');
+  if (SKIN_HUD) document.body.classList.add('skin-hud');
 }
 
 /* skin=hud：面板文案换成英文（宿主 ironman-hud 是全英文界面）。
@@ -242,7 +243,6 @@ const bgFx = {
         float h = vDir.y * 0.5 + 0.5;
         vec3 col = mix(vec3(0.008, 0.012, 0.019), vec3(0.020, 0.030, 0.046), smoothstep(0.0, 0.55, h));
         col = mix(col, vec3(0.038, 0.055, 0.080), smoothstep(0.55, 1.0, h));
-        col += uColor * 0.05 * exp(-pow((h - 0.48) * 9.0, 2.0));   // 地平线微光
         gl_FragColor = vec4(col, 0.0);
       }`,
     side: THREE.BackSide, depthWrite: false, transparent: true, ...PURE_ADD,
@@ -359,9 +359,13 @@ const bgFx = {
   }
 
   // 5) 极坐标地面网格（静态，颜色取线条色的暗调）
+  //    skin=hud（诊断页，画面容器窄）：缩小半径 + 减少圈数，外圈完整落在视野内，
+  //    不会在容器左右被裁出半段弧；其余页面保持原尺寸
   {
+    const R = SKIN_HUD ? 1.4 : 5.4;
+    const rings = SKIN_HUD ? 5 : 9;
     const c = new THREE.Color(state.lineColor);
-    const grid = new THREE.PolarGridHelper(5.4, 12, 9, 72, c.clone().multiplyScalar(0.30), c.clone().multiplyScalar(0.12));
+    const grid = new THREE.PolarGridHelper(R, 12, rings, 72, c.clone().multiplyScalar(0.30), c.clone().multiplyScalar(0.12));
     grid.material.transparent = true;
     grid.material.opacity = 0.5;
     grid.material.depthWrite = false;

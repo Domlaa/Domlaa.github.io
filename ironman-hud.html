@@ -366,13 +366,17 @@
     mask-image: radial-gradient(circle at 50% 50%, #000 30%, transparent 78%);
   }
 
+  /* 两个装饰圆环：按高度内接于装甲显示区（iframe 94%×84%，中心在面板 45% 高度处），
+     避免外圈被面板边缘裁出半段弧 */
   #ring-bg {
-    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-    width: min(86%, 660px); height: auto; z-index: 1; opacity: .55; pointer-events: none;
+    position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%);
+    height: min(80%, 620px); width: auto; aspect-ratio: 1;
+    z-index: 1; opacity: .55; pointer-events: none;
   }
   .ring-ticks {
-    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-    width: min(76%, 560px); aspect-ratio: 1; z-index: 1; pointer-events: none; opacity: .45;
+    position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%);
+    height: min(74%, 560px); width: auto; aspect-ratio: 1;
+    z-index: 1; pointer-events: none; opacity: .45;
   }
   .ring-ticks span {
     position: absolute; inset: 0; border-radius: 50%;
