@@ -1,0 +1,162 @@
+name: Deploy · GitHub Pages
+
+# 本站是免构建的纯静态站点（原生 ES Modules + importmap + 本地化 Three.js）。
+# 因此这个工作流不做打包，只做三件事：
+#   1. 语法与模块引用检查（把「旧模块引用已删除文件」这类问题挡在部署前）
+#   2. 校验入口页面与大体积模型资源确实存在
+#   3. 剔除开发用文件，把站点作为 Pages 制品发布
+#
+# 前置条件：仓库 Settings → Pages → Source 选择 "GitHub Actions"。
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# 同一分支只保留最新一次部署，避免旧的构建覆盖新的
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    name: 检查并组装站点
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # 逐文件做 ESM 语法检查。走 stdin + --input-type=module，
+      # 避免 Node 把 .js 当成 CommonJS 解析而误报 import/export。
+      - name: 语法检查
+        run: |
+          set -euo pipefail
+          count=0
+          for f in $(find js -type f -name '*.js' | sort); do
+            node --input-type=module --check < "$f"
+            count=$((count + 1))
+          done
+          echo "已检查 ${count} 个模块"
+
+      # 模块图断掉时页面只会停在启动画面，Console 才有报错。
+      # 这里把所有相对路径 import/export 与动态 import 解析一遍。
+      - name: 校验模块引用可解析
+        run: |
+          set -euo pipefail
+          node - <<'EOF'
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) return walk(full);
+            return entry.name.endsWith('.js') ? [full] : [];
+          });
+
+          const files = walk('js');
+          const pattern = /(?:import|export)\s[^'"]*?from\s*['"]([^'"]+)['"]|import\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+
+          let broken = 0;
+          for (const file of files) {
+            const source = fs.readFileSync(file, 'utf8');
+            for (const match of source.matchAll(pattern)) {
+              const spec = match[1] || match[2];
+              if (!spec.startsWith('.')) continue; // 裸模块（three / three/addons）由 importmap 解析
+              const target = path.resolve(path.dirname(file), spec);
+              if (!fs.existsSync(target) || !fs.statSync(target).isFile()) {
+                console.error(`✗ ${file} 引用了不存在的模块: ${spec}`);
+                broken++;
+              }
+            }
+          }
+
+          if (broken > 0) {
+            console.error(`共 ${broken} 处模块引用失效`);
+            process.exit(1);
+          }
+          console.log(`模块引用检查通过（${files.length} 个文件）`);
+          EOF
+
+      # 模型体积大且不在代码里被静态 import，用文件存在性兜底，
+      # 避免仓库迁移 / 忽略规则变化后线上白屏。
+      - name: 校验页面与模型资源
+        run: |
+          set -euo pipefail
+          required=(
+            index.html
+            mk85.html
+            mk7.html
+            mk7-tiny.html
+            ironman-hud.html
+            jarvis-console.html
+            css/hud.css
+            css/mk7.css
+            css/showcase.css
+            assets/models/mk85.fbx
+            assets/models/armor2.glb
+            "model/tiny/irobny2_optimized.glb"
+            "model/tiny/hulk+buster2_optimized.glb"
+            lib/three/three.module.js
+            lib/three/three.core.js
+            lib/three/addons/loaders/GLTFLoader.js
+            lib/three/addons/loaders/FBXLoader.js
+            lib/three/addons/libs/draco/draco_decoder.wasm
+          )
+          missing=0
+          for f in "${required[@]}"; do
+            if [ ! -f "$f" ]; then
+              echo "✗ 缺少文件: $f"
+              missing=$((missing + 1))
+            fi
+          done
+          if [ "$missing" -gt 0 ]; then
+            exit 1
+          fi
+          echo "资源检查通过（${#required[@]} 项）"
+
+      - name: 组装发布目录
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          rsync -a \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude '.shots/' \
+            --exclude '.workbuddy/' \
+            --exclude 'dist/' \
+            --exclude '.gitignore' \
+            --exclude '._.gitignore' \
+            --exclude 'serve.py' \
+            --exclude 'README.md' \
+            ./ dist/
+          echo "站点体积：$(du -sh dist | cut -f1)"
+
+      - name: 配置 Pages
+        uses: actions/configure-pages@v5
+
+      - name: 上传制品
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    name: 发布到 GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 部署
+        id: deployment
+        uses: actions/deploy-pages@v4
