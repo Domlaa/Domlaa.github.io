@@ -351,7 +351,7 @@ function syncBgColor() {
     }
   }
 
-  // 4) 垂直扫描环：水平光环沿 Y 轴上下往返（余弦驱动 → 自带缓入缓出）
+  // 4) 垂直扫描环：水平光环沿 Y 轴上下往返（三角波为主 + 折返处柔化 → 全程近匀速）
   //    能量扫描造型：运动前沿白热窄核 + 尾迹衰减成线色（单色相渐变，色相跟随取色器）；
   //    折返点速度为零时白热核自动熄灭，退化成对称柔光
   {
@@ -397,11 +397,15 @@ function syncBgColor() {
       transparent: true, depthWrite: false, side: THREE.DoubleSide, ...PURE_ADD,
     }));
     const r1 = mkRing(0.92, 1.0);   // 主环：带刻度
-    const r2 = mkRing(0.36, 0.0);   // 副环：无刻度、错相慢速
+    const r2 = mkRing(0.36, 0.0);   // 副环：无刻度，作为主环的随行 escort
     g.add(r1, r2);
+    // 同速 + 固定相位差：两环永远保持固定间距、同向同行（配对扫描），
+    // 旧版速度不可通约（0.85 / 0.55）导致两环各自乱漂、来回对穿，看起来不协调。
+    // HUD 皮肤舞台更矮（上下都留了 HUD 边），扫描上限收到 1.80，免得环在最高点被舞台沿硬切出断面。
+    const yTop = SKIN_HUD ? 1.80 : 1.98;
     bgFx.rings.push(
-      { mesh: r1, min: 0.05, max: 1.98, speed: 0.85, phase: 0 },
-      { mesh: r2, min: 0.10, max: 1.90, speed: 0.55, phase: 2.2 },
+      { mesh: r1, min: 0.05, max: yTop, speed: 1.0, phase: 0 },
+      { mesh: r2, min: 0.05, max: yTop, speed: 1.0, phase: -0.62 },
     );
   }
 
@@ -933,13 +937,19 @@ function tick() {
   const flowUni = edgeMat.uniforms.uFlow;
   flowUni.value += ((state.flow ? 0.9 : 0) - flowUni.value) * Math.min(1, dt * 6.5);
 
-  // 背景动画：闪烁 / 光柱起伏 + 扫描环垂直往返（余弦 → 自带缓入缓出）
+  // 背景动画：闪烁 / 光柱起伏 + 扫描环垂直往返
   if (state.bg) {
     bgFx.uTime.value = state.time;
     for (const r of bgFx.rings) {
       const w = state.time * r.speed + r.phase;
-      r.mesh.position.y = r.min + (r.max - r.min) * (0.5 - 0.5 * Math.cos(w));
-      // 扫描环能量渐变：前沿朝向 = 运动方向；白热强度 ∝ |速度|（折返时熄灭成对称柔光）
+      // 三角波为主（全程近匀速）+ 22% 余弦（只给折返处一点柔性）。
+      // 纯余弦会在两端速度趋零，环在顶/底「停留」近半秒才起步 —— 看起来像卡顿。
+      const TAU = Math.PI * 2;
+      const u = ((w % TAU) + TAU) % TAU;
+      const tri = u < Math.PI ? u / Math.PI : 2 - u / Math.PI;   // 0→1→0 线性
+      const p = tri * 0.78 + (0.5 - 0.5 * Math.cos(w)) * 0.22;
+      r.mesh.position.y = r.min + (r.max - r.min) * p;
+      // 扫描环能量渐变：前沿朝向 = 运动方向；白热强度在折返处短暂压暗
       const vel = Math.sin(w);
       r.mesh.material.uniforms.uDir.value = vel >= 0 ? 1 : -1;
       r.mesh.material.uniforms.uHot.value = Math.min(1, Math.abs(vel) * 1.4);
