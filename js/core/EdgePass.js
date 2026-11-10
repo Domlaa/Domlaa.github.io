@@ -93,14 +93,17 @@ const QUAD_FRAG = /* glsl */`
     float lineLight = 1.0 - smoothstep(0.0, 0.55, uSurface);
 
     // ---------- 流光：柔和渐变的扫描带 ----------
-    // fy = 0 是扫描头；沿 +y 上行时，已扫过的一侧落在 fy→1。
-    // 「前沿高斯 + 向下长指数拖尾」取 max：两者在 fy=0 / fy=1 处数值接近，
-    // 衔接连续不会出现硬边；再用 smoothstep 做一次 S 形柔化。
-    float fy = fract(vUv.y - uTime * uFlowSpeed);   // 1.0 = one band per screen height
-    float head = exp(-pow(fy * 14.0, 2.0));        // leading core (fast falloff upward)
-    float trail = exp(-(1.0 - fy) * 7.0);          // long trail below (already swept)
-    float band = smoothstep(0.02, 1.0, max(head, trail));
-    float pulse = clamp(band, 0.0, 1.0) * uFlow;
+    // 带心从画面下方之外升到上方之外，两端都在画外 → 循环回卷时看不到跳变
+    // （旧版用 fract(vUv.y - …) 取带子，接缝处亮度突变，是「生硬」的主因）。
+    // 包络是两侧不同衰减速度的指数函数：前缘快收、下摆长余晖，亮度沿 y
+    // 连续变化，不再有「窄亮核 + 带外死黑」那种一刀切。
+    float sweep = fract(uTime * uFlowSpeed / 2.1);   // ÷2.1 让扫速仍是 uFlowSpeed 屏高/秒
+    float bandY = mix(-0.55, 1.55, sweep);
+    float dz = vUv.y - bandY;
+    float below = exp(-max(dz, 0.0) * 3.4);          // 已扫过（下方）：长余晖
+    float above = exp(-max(-dz, 0.0) * 8.0);         // 未扫到（上方）：短前缘
+    float alive = smoothstep(0.0, 0.05, uFlowSpeed); // 速度归零 → 淡出，别在底部留一条死光
+    float pulse = mix(below, above, step(0.0, -dz)) * uFlow * alive;
 
     vec3 ink = vec3(0.012, 0.017, 0.024);
     float baseDim = mix(1.0, 0.78, clamp(uFlow, 0.0, 1.0));

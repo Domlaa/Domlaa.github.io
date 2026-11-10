@@ -530,19 +530,28 @@ const edgeMat = new THREE.ShaderMaterial({
       // 表面压暗后暗线会不可见：表面越暗，线条自动越亮
       float lineLight = clamp(uLight + 1.0 - smoothstep(0.0, 0.55, uSurface), 0.0, 1.0);
 
-      // 流光脉冲 v2：窄亮核 + 长拖尾。开启流光时基线压暗到 0.78×、峰值提到
-      // ≈3.1× 线色 —— 流光与静态线条的亮度比从 ~2.1:1 拉开到 ~4:1
-      float fy = fract(vUv.y * 1.35 - uTime * 0.22);
-      float head = smoothstep(0.075, 0.012, fy);                     // 前缘锐利的窄亮核
-      float tail = pow(max(1.0 - fy * 2.35, 0.0), 2.2) * 0.46;       // 指数衰减拖尾
-      float pulse = clamp(head + tail * (1.0 - head * 0.55), 0.0, 1.0) * uFlow;
+      // 流光 v3：单向扫掠的柔和光带。
+      // 旧版的三个硬伤：① 用 fract(vUv.y * 1.35) 取带子，频率非 1 → 上下接缝亮度突变；
+      // ② 亮核 smoothstep(0.075, 0.012) 只有 6% 屏高、边沿近乎阶跃；
+      // ③ 拖尾只覆盖 42% 高度，其余是一整片死黑 → 视觉上就是「一条亮杠在扫」。
+      // 现在：带心从画面下方之外升到上方之外（两端都在画外，回卷时看不见跳变），
+      // 包络改为两侧不同衰减速度的指数函数，前缘快收、下摆长余晖，
+      // 亮度沿 y 连续变化，任何位置都没有硬边。
+      float sweep = fract(uTime * 0.11);                             // 9.1s 一趟，缓
+      float bandY = mix(-0.55, 1.55, sweep);                         // 带心 y（0 = 底, 1 = 顶）
+      float dz = vUv.y - bandY;
+      float below = exp(-max(dz, 0.0) * 3.4);                        // 已扫过（下方）：长余晖
+      float above = exp(-max(-dz, 0.0) * 8.0);                       // 未扫到（上方）：短前缘
+      float pulse = mix(below, above, step(0.0, -dz)) * uFlow;
 
       vec3 ink = vec3(0.012, 0.017, 0.024);
       float baseDim = mix(1.0, 0.78, clamp(uFlow * 1.1, 0.0, 1.0));  // 流光开启 → 基线略压暗
       vec3 lineCol = mix(ink, uLineColor * baseDim, lineLight);
-      vec3 pulseCol = uLineColor * (1.75 + 1.35 * pulse);
+      // 峰值由旧版的 ~3.1× 收到 ~2.15×，且光带边缘平滑回落到 1.30×，
+      // 与暗部基线 0.78× 之间是一整段连续过渡，不再有亮暗突跳。
+      vec3 pulseCol = uLineColor * (1.30 + 0.85 * pulse);
       lineCol = mix(lineCol, pulseCol, pulse);
-      col = mix(col, lineCol, edge * mix(0.92, 0.5, lineLight) * (1.0 + pulse * 0.55));
+      col = mix(col, lineCol, edge * mix(0.92, 0.5, lineLight) * (1.0 + pulse * 0.28));
 
       // 输出 alpha：贾维斯模式透传 RT alpha（装甲 1 / 背景 0，iframe 从画布下面透出），
       // 普通模式恒为 1（不透明，保持程序化 3D 背景的观感）。mask 即 tColor.a。
@@ -564,7 +573,14 @@ const normalMat = new THREE.MeshNormalMaterial({ side: THREE.FrontSide });
 /* 模型                                                                */
 /* ------------------------------------------------------------------ */
 let model = null;
-const JUNK = /Plane|CreationNulCrew|IK_char_/i;
+/**
+ * 辅助体过滤：只认「叫 Plane 的那个地面片」（MK VII 里 2 个三角形）、
+ * CreationNulCrew（自带的占位人形）、IK_char_ 前缀的贴图文字。
+ * 千万不能宽匹配 /Plane/：反浩克的装甲部件大量叫 Plane002 / Plane004 / Plane010 …，
+ * 它的整个头部（Base_HumanHead 下的 Plane002 / .001 / .006 / .008 / .036）
+ * 和肋甲、骨盆、上臂、前臂、大腿、小腿都在这个前缀里 —— 宽匹配会把半个身子删掉。
+ */
+const JUNK = /^Plane$|CreationNulCrew|IK_char_/i;
 
 /**
  * 结构线模式（?flat=1）：全部部件换成同一套素模材质。
@@ -870,7 +886,9 @@ function tick() {
   edgeMat.uniforms.uSurface.value = state.surface;
   state.time += dt;
   edgeMat.uniforms.uTime.value = state.time;
-  edgeMat.uniforms.uFlow.value = state.flow ? 0.9 : 0;
+  // 流光强度朝目标缓动（约 0.4s 淡入/淡出）：开关切换时不闪一下
+  const flowUni = edgeMat.uniforms.uFlow;
+  flowUni.value += ((state.flow ? 0.9 : 0) - flowUni.value) * Math.min(1, dt * 6.5);
 
   // 背景动画：闪烁 / 光柱起伏 + 扫描环垂直往返（余弦 → 自带缓入缓出）
   if (state.bg) {
