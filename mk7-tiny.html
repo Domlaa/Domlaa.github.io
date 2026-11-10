@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<!--
+  压缩模型对比测试页（不影响线上页面）：
+  加载 model/tiny/ 下经
+  npx @gltf-transform/cli optimize <in> <out> --compress draco --texture-compress webp
+  压缩的 GLB，跑与 mk7.html 完全相同的渲染管线（线稿三通道 / 拆解 / 流光 / 背景），
+  用于验证 draco + webp 压缩是否可替换 assets/models/armor2.glb（39.85MB）。
+
+  两个模型：
+    · irobny2_optimized.glb          5.71MB · 90,543 tris · 单网格 → 可直接替换
+    · hulk+buster2_optimized.glb     6.94MB · 323,384 tris · 117 网格多材质（反浩克）
+      多材质会被切分管线按「首个三角形材质」压成单材质，导致大片错贴图，需按材质分组切分才能用。
+
+  Draco 解码器本地化于 lib/three/addons/libs/draco/。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
+<link rel="icon" href="data:,">
+<title>MARK VII · 压缩模型对比测试</title>
+<link rel="stylesheet" href="./css/mk7.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./lib/three/three.module.js",
+    "three/addons/": "./lib/three/addons/"
+  }
+}
+</script>
+<style>
+  /* 仅本测试页：模型切换条（不写入 mk7.css） */
+  .cmpbar {
+    position: fixed; left: 16px; top: 156px; z-index: 40;
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 9px 11px; border: 1px solid rgba(219, 237, 255, .18);
+    background: rgba(8, 13, 20, .78); backdrop-filter: blur(8px);
+    font: 10px/1.5 "SFMono-Regular", "Consolas", ui-monospace, monospace;
+    letter-spacing: .06em; max-width: 268px;
+  }
+  .cmpbar b { color: #dbedff; font-weight: 600; letter-spacing: .16em; font-size: 9px; }
+  .cmpbar a, .cmpbar span {
+    color: rgba(219, 237, 255, .62); text-decoration: none; white-space: nowrap;
+  }
+  .cmpbar a:hover { color: #dbedff; }
+  .cmpbar .cur { color: #7cf3c0; }
+  .cmpbar .n { color: rgba(219, 237, 255, .4); }
+</style>
+</head>
+<body>
+<iframe id="jarvis" data-src="haloflux/wallpaper/index.html?preset=a" title="贾维斯背景 · HALOFLUX by Ryder191" scrolling="no" tabindex="-1" aria-hidden="true"></iframe>
+<div id="jarvisveil"></div>
+<canvas id="stage"></canvas>
+<div class="vignette"></div>
+
+<header class="masthead">
+  <p class="eyebrow">STRUCTURE STUDY · MK VII · TINY TEST</p>
+  <h1>MARK <span>VII</span></h1>
+  <p class="sub">压缩模型对比 · model/tiny/irobny2_optimized.glb（draco + webp · 5.7MB）</p>
+</header>
+
+<aside class="stats">
+  <div class="stat"><span class="k">TRIS</span><span class="v" id="st-tris">—</span></div>
+  <div class="stat"><span class="k">FPS</span><span class="v" id="st-fps">—</span></div>
+  <div class="stat"><span class="k">LINE</span><span class="v" id="st-line">100%</span></div>
+</aside>
+
+<nav class="cmpbar" aria-label="模型切换">
+  <b>COMPRESSED MODEL TEST</b>
+  <a href="./mk7-tiny.html?model=model/tiny/irobny2_optimized.glb" class="cur">▶ irobny2 · 5.7MB · 90.5k tris</a>
+  <a href="./mk7-tiny.html?model=model/tiny/hulk%2Bbuster2_optimized.glb&fit=1.3">▶ hulk+buster2 · 6.9MB · 323k tris</a>
+  <a href="./mk7.html">◇ 原版 armor2.glb · 39.9MB</a>
+  <span class="n">同一渲染管线 · Draco 解码器本地</span>
+</nav>
+
+<nav class="toolbar" aria-label="渲染控制">
+  <div class="tb-row">
+    <button id="btn-rotate" class="on" title="自动旋转 (Space)">自动旋转</button>
+    <button id="btn-lineonly" title="仅显示线条，隐藏装甲表面 (O)">仅线条</button>
+    <button id="btn-split" title="拆卸 / 合并装甲 (E)">拆卸</button>
+    <button id="btn-flow" class="on" title="线条流光 (G)">流光</button>
+    <button id="btn-bg" class="on" title="3D 空间背景 (B)">背景</button>
+    <button id="btn-jarvis" title="贾维斯背景 · HALOFLUX (J)">贾维斯</button>
+    <button id="btn-invert" title="暗线 / 亮线 (L)">暗线</button>
+    <label class="picker" title="线条颜色">
+      <input id="in-color" type="color" value="#dbedff">
+    </label>
+    <button id="btn-reset" title="重置视角 (R)">重置</button>
+    <button id="btn-shot" title="保存画面 (S)">截图</button>
+    <button id="btn-full" title="全屏 (F)">全屏</button>
+  </div>
+  <div class="tb-sliders">
+    <label class="slider" title="线稿强度">
+      <span>线稿</span>
+      <input id="rg-strength" type="range" min="0" max="1" step="0.01" value="0.85">
+    </label>
+    <label class="slider" title="线条粗细（像素）">
+      <span>粗细</span>
+      <input id="rg-width" type="range" min="0.4" max="2.2" step="0.05" value="1.05">
+    </label>
+    <label class="slider" title="装甲表面颜色与亮度（0 = 纯线稿）">
+      <span>表面</span>
+      <input id="rg-surface" type="range" min="0" max="1" step="0.01" value="1">
+    </label>
+  </div>
+</nav>
+
+<p class="hint">拖拽旋转 · 滚轮缩放 · 双击重置 · O 纯线稿 · E 拆卸 · G 流光 · B 背景 · J 贾维斯 · M 音乐</p>
+<p class="credit">贾维斯背景：<a href="https://github.com/Ryder191/haloflux" target="_blank" rel="noopener">HALOFLUX</a> by Ryder191 · PolyForm NC</p>
+<a class="back" href="./mk7.html">MK7 原版 →</a>
+
+<div class="loader" id="loader">
+  <div class="ring"><svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="34"></circle><circle id="prog" cx="40" cy="40" r="34"></circle></svg></div>
+  <p class="pct" id="pct">0%</p>
+  <p class="ld-text" id="ld-text">加载装甲模型…</p>
+</div>
+
+<div class="error hidden" id="error">
+  <p class="err-title">加载失败</p>
+  <p class="err-msg" id="err-msg"></p>
+  <button id="btn-retry">重试</button>
+</div>
+
+<script type="module" src="./js/showcase7/main.js" data-model="model/tiny/irobny2_optimized.glb"></script>
+<script>
+// 副标题跟随当前模型名（?model= 优先，否则用 data-model）
+(function () {
+  var q = new URLSearchParams(location.search).get('model');
+  var el = document.querySelector('script[type="module"][data-model]');
+  var path = q || (el && el.dataset.model) || '';
+  var name = decodeURIComponent(path.split('/').pop());
+  var sub = document.querySelector('.masthead .sub');
+  if (name && sub) sub.textContent = '压缩模型对比 · ' + name + '（draco + webp）';
+})();
+</script>
+</body>
+</html>

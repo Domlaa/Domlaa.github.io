@@ -12,6 +12,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { splitArmorMeshes, getSplitStats, SPLIT_DEFS } from './segment.js';
@@ -27,7 +28,27 @@ const CONFIG = {
   normalScale: 0.45,    // 法线贴图强度（原图是噪声，压低只留起伏）
   safeTop: 30,
   safeBottom: 104,
+  fitScale: 1,          // 取景距离倍率：宽体/厚深度模型（如反浩克）需 >1 才不被裁切；1 = 原行为
 };
+
+// 允许覆盖模型路径：优先级 ?model=… 查询参数 > 引入脚本的 data-model 属性 > CONFIG 默认值。
+// 不带任何覆盖时行为完全不变。测试页用 data-model 写死默认模型，仍可用 ?model= 临时切换。
+{
+  const u = new URLSearchParams(location.search);
+  const scriptEl = () => document.querySelector('script[type="module"][data-model]');
+  let m = u.get('model');
+  if (!m) {
+    // 注意：ES module 执行时 document.currentScript 恒为 null，只能按属性选。
+    const el = scriptEl();
+    if (el && el.dataset.model) m = el.dataset.model;
+  }
+  if (m) CONFIG.url = m.startsWith('./') || m.startsWith('/') ? m : './' + m;
+
+  // 取景倍率同样可覆盖（?fit=1.3 或 data-fit="1.3"），用于宽体模型
+  const fitOverride = u.get('fit') || (scriptEl() && scriptEl().dataset.fit);
+  const fitNum = Number(fitOverride);
+  if (fitOverride && fitNum > 0) CONFIG.fitScale = fitNum;
+}
 
 const state = {
   auto: true,
@@ -513,7 +534,9 @@ function frameCamera(height) {
   const fitH = (height / 2) / Math.tan(vFov / 2);
   const fitW = (height * 0.68) / (2 * Math.tan(vFov / 2) * Math.max(0.5, camera.aspect));
   const narrow = camera.aspect < 0.85;
-  const d = Math.max(fitH, fitW) * (narrow ? 1.34 : 1.14);
+  // CONFIG.fitScale 默认 1：仅宽体/厚深度模型（如反浩克，宽深比接近 1）需要放大取景距离，
+  // 否则包围盒近端角点会被投影放大而超出视口。
+  const d = Math.max(fitH, fitW) * (narrow ? 1.34 : 1.14) * (CONFIG.fitScale || 1);
   state.fit.dist = d;
 
   const vh = innerHeight || 900;
@@ -573,7 +596,10 @@ async function boot() {
 
   const t0 = performance.now();
   try {
-    const gltf = await new GLTFLoader(manager).loadAsync(CONFIG.url, (e) => {
+    // Draco 几何压缩支持（本地解码器在 lib/three/addons/libs/draco/）；
+    // 非 draco 模型走原路径，行为不变
+    const draco = new DRACOLoader(manager).setDecoderPath('./lib/three/addons/libs/draco/');
+    const gltf = await new GLTFLoader(manager).setDRACOLoader(draco).loadAsync(CONFIG.url, (e) => {
       if (e.lengthComputable) setProgress(e.loaded / e.total, (e.loaded / 1048576).toFixed(1));
     });
 

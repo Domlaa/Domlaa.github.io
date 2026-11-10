@@ -433,12 +433,22 @@ function buildRegionGeometry(tris, center) {
   });
 
   // 合并各源的同名属性 + 拼接索引
+  // 注意：不同 primitive 的属性集可能不一致（gltf-transform optimize 会裁剪未用属性，
+  // draco 压缩后各 primitive 保留的属性也可能不同）。按**并集**合并，缺该属性的源补 0，
+  // 否则 d.maps[name] 为 undefined 会直接抛错。
   const g = new THREE.BufferGeometry();
-  const names = attrData[0].names;
+  const nameSet = new Set();
+  attrData.forEach((d) => d.names.forEach((n) => nameSet.add(n)));
+  const names = Array.from(nameSet);
   for (const name of names) {
-    const itemSize = attrData[0].maps[name].at.itemSize;
+    const probe = attrData.find((d) => d.maps[name]);
+    if (!probe) continue;
+    const itemSize = probe.maps[name].at.itemSize;
     const merged = new Float32Array(totalVerts * itemSize);
-    attrData.forEach((d) => merged.set(d.maps[name].arr, d.vertBase * itemSize));
+    attrData.forEach((d) => {
+      const m = d.maps[name];
+      if (m && m.arr.length) merged.set(m.arr, d.vertBase * itemSize);
+    });
     g.setAttribute(name, new THREE.BufferAttribute(merged, itemSize));
   }
   const indexArr = new Uint32Array(tris.length * 3);
