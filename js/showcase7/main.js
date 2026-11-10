@@ -31,6 +31,8 @@ const CONFIG = {
   fitScale: 1,          // 取景距离倍率：宽体/厚深度模型（如反浩克）需 >1 才不被裁切；1 = 原行为
   rot0: 0,              // 初始朝向（度）：并排多展位时错开起始相位，避免同步旋转
   flat: false,          // 结构线模式：丢弃贴图，装甲换成同一套素模材质（只留几何轮廓线）
+  splitZoom: 1.40,      // 拆解态的相机后拉倍率（零件向四周散开，需要让出取景空间）
+  splitTargetY: 0.50,   // 拆解态视点高度（× 身高）：整体外扩后重心回到身高中段
 };
 
 // 允许覆盖模型路径：优先级 ?model=… 查询参数 > 引入脚本的 data-model 属性 > CONFIG 默认值。
@@ -690,11 +692,11 @@ function frameCamera(height) {
 }
 
 /** 拆解状态下的视线高度：爆炸图整体上移，视点跟着抬到 0.64H */
-const splitTargetY = () => CONFIG.targetHeight * 0.64;
+const splitTargetY = () => CONFIG.targetHeight * CONFIG.splitTargetY;
 
 function resetView() {
   if (!model) return;
-  const d = state.fit.dist * (state.split ? 1.45 : 1);
+  const d = state.fit.dist * (state.split ? CONFIG.splitZoom : 1);
   const dir = new THREE.Vector3(0.26, 0.1, 1).normalize();
   controls.target.set(0, state.split ? splitTargetY() : state.fit.targetY, 0);
   camera.position.copy(controls.target).addScaledVector(dir, d);
@@ -755,15 +757,20 @@ async function boot() {
 
     root.updateMatrixWorld(true);   // 骨骼静止姿态需要 matrixWorld
 
-    // 单块蒙皮网格 → 烘焙蒙皮 → 归一化 → 连通域岛屿切分成 7 个模块
+    // 单块蒙皮网格 → 烘焙蒙皮 → 归一化 → 连通域岛屿 → 零件级拆分
+    // （380 片甲片先各自成岛，再按「同区域 + 质心近 + 朝向近」合并成几十个零件，
+    //   拆解时每片沿自己的朝向弹开，而不是 7 个大块整体平移）
     const armorMeshes = [];
     root.traverse((o) => { if (o.isMesh && o.visible) armorMeshes.push(o); });
     const pieces = splitArmorMeshes(armorMeshes, CONFIG.targetHeight);
     window.__splitStats = getSplitStats();
 
+    const H = CONFIG.targetHeight;
+    const UP = new THREE.Vector3(0, 1, 0);
     const group = new THREE.Group();
     state.modules = [];
-    for (const [region, piece] of pieces) {
+    for (const [pid, piece] of pieces) {
+      const region = piece.region;
       const def = SPLIT_DEFS[region] || { offset: [0, 0, 0], rotate: [0, 0, 0], stagger: 0 };
       const pivot = new THREE.Group();
       pivot.position.copy(piece.center);
@@ -772,13 +779,48 @@ async function boot() {
       mesh.userData.moduleId = region;
       pivot.add(mesh);
       group.add(pivot);
+
+      // 弹出方向 = 从身体中心向外的径向（主）+ 甲片自身朝向（辅）
+      // 纯按法线走会让正面甲片全往前挤、侧面全往外挤，从正面看是乱的；
+      // 以躯干中轴为中心做球状扩散，层次才是干净的「拆开」而不是「炸开」。
+      // 径向只取水平分量：如果连高度一起算，脚部件的径向几乎是垂直向下，
+      // 拆开时整只脚会往下掉出画面。水平径向 + 甲片法线里的 y 分量才自然。
+      const radial = new THREE.Vector3(piece.center.x, 0, piece.center.z);
+      const rlen = piece.center.distanceTo(new THREE.Vector3(0, H * 0.55, 0));
+      if (radial.lengthSq() > 1e-6) radial.normalize(); else radial.set(0, 1, 0);
+      // 甲片朝向为主 + 身体径向为辅：每片沿自己的装配法线脱开，
+      // 整体轮廓仍是「人形膨胀」，不会散成零件云 —— 这是拆甲和爆炸图的区别。
+      const regDir = new THREE.Vector3(...def.offset);
+      if (regDir.lengthSq() > 1e-8) regDir.normalize(); else regDir.set(0, 1, 0);
+      const dir = piece.normal.clone().multiplyScalar(0.58)
+        .addScaledVector(radial, 0.42)
+        .addScaledVector(regDir, 0.12);   // 区域方向的少量偏置：同区域整体略微同向
+      if (dir.y < -0.4) { dir.y = -0.4; }   // 脚底件不许垂直下坠，否则会掉出取景
+      if (dir.lengthSq() < 1e-8) dir.copy(UP); else dir.normalize();
+      // 离身体中心越远走得越开（幂次 >1 抑制极端值），外轮廓呈柔和球状
+      const rNorm = Math.min(0.9, rlen / (H * 0.62));   // 上限 0.9：脚这类远端件别飞太远
+
+      // 掀盖轴：绕水平轴翻一个小角度，甲片像卸下螺丝那样抬起而不是平移
+      const axis = new THREE.Vector3().crossVectors(dir, UP);
+      if (axis.lengthSq() < 1e-6) axis.set(1, 0, 0); else axis.normalize();
+      // 稳定伪随机：同一片每次拆装姿态一致（range 0..1）
+      const h = Math.sin(piece.center.x * 73.1 + piece.center.y * 41.7 + piece.center.z * 57.3) * 43758.5453;
+      const rnd = h - Math.floor(h);
+      const tilt = (0.035 + 0.085 * rnd) * (rnd > 0.5 ? 1 : -1);
+
+      const quat = new THREE.Quaternion().setFromAxisAngle(axis, tilt);
+      quat.multiply(new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(def.rotate[0], def.rotate[1], def.rotate[2])));
+
       state.modules.push({
-        id: region,
+        id: pid,
         pivot,
         base: piece.center.clone(),
-        off: new THREE.Vector3(...def.offset).multiplyScalar(CONFIG.targetHeight),
-        rot: new THREE.Vector3(...def.rotate),
-        stagger: def.stagger,
+        off: dir.multiplyScalar(H * (0.072 + 0.112 * Math.pow(rNorm, 1.4)))
+                .addScaledVector(regDir, H * 0.06),
+        quat,
+        // 拆解节奏：区域顺序 + 由高到低，像自上而下逐层卸甲
+        stagger: (1 - piece.center.y / H) * 0.74 + def.stagger * 0.16,   // 高处先脱开，自上而下卸甲
         t: 0,
         anim: null,
       });
@@ -877,7 +919,8 @@ function tick() {
       : (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
     m.t = a.from + (a.to - a.from) * e;
     m.pivot.position.copy(m.base).addScaledVector(m.off, m.t);
-    m.pivot.rotation.set(m.rot.x * m.t, m.rot.y * m.t, m.rot.z * m.t);
+    if (m.quat) m.pivot.quaternion.identity().slerp(m.quat, m.t);
+    else m.pivot.rotation.set(m.rot.x * m.t, m.rot.y * m.t, m.rot.z * m.t);
   }
 
   edgeMat.uniforms.uStrength.value = state.showLine ? state.strength : 0;
@@ -1151,7 +1194,7 @@ function toggleSplit() {
   // 相机后拉 + 视点上移 / 复位
   state.zoomAnim = {
     fromD: camera.position.distanceTo(controls.target),
-    toD: state.fit.dist * (state.split ? 1.45 : 1),
+    toD: state.fit.dist * (state.split ? CONFIG.splitZoom : 1),
     fromY: controls.target.y,
     toY: state.split ? splitTargetY() : state.fit.targetY,
     t0: now,

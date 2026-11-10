@@ -6,22 +6,27 @@
  * 因此先按 skinIndex/skinWeight 手动烘焙顶点到世界坐标（等价于着色器的蒙皮变换）。
  *
  * 区域划分用「连通域（岛屿）切分」：焊接重合顶点后按共享边洪水填充，
- * 几何上连成一片的甲片整块归属同一模块（切口沿建模留出的甲片缝隙走，
+ * 几何上连成一片的甲片整块成为独立单元（切口沿建模留出的甲片缝隙走，
  * 不会把甲片拦腰切断）；只有跨区域的大岛才回退为直线切分。
  *
- * 归一化在烘焙坐标上完成（高 1.95、贴地、居中），子网格顶点减去区域中心，
+ * 拆解粒度：岛屿（本模型 380 片）先各自成单元，再按「同区域 + 质心邻近 +
+ * 朝向近似」合并成几十个零件。零件太少（原先 7 个大块）时整条手臂、整个
+ * 躯干壳会一起平移，断口裸露成「撕开」；太多又会碎成零件云。
+ *
+ * 归一化在烘焙坐标上完成（高 1.95、贴地、居中），子网格顶点减去零件质心，
  * pivot.position = center + offset * H * t —— 位移恒为绝对量，反复拆装无累积误差。
  */
 import * as THREE from 'three';
 
 export const REGIONS = ['helmet', 'chest', 'back', 'armL', 'armR', 'legL', 'legR'];
 
-/** 最近一次切分的统计（islands / wholeIslands / splitIslands / largestIsland / tris） */
+/** 最近一次切分的统计（islands / wholeIslands / splitIslands / largestIsland / tris / pieces） */
 let splitStats = null;
 export function getSplitStats() { return splitStats; }
 
 /**
- * 拆解定义：offset/rotate 为相对模型总高 H 的比例（沿用 index 页调好的参数）
+ * 区域定义：offset 现在是「区域朝向」（归一化后以 0.12 权重参与脱开方向计算，
+ * 让同区域的零件整体略微同向）；rotate 是拆开时叠加的附加旋转（弧度）。
  * 注：这份模型的腕部包着一块长条护板，横切任何高度都会把它撕成碎片，
  *     因此手与前臂合为 arm 模块，不单独拆分。
  */
@@ -175,6 +180,7 @@ export function splitArmorMeshes(meshes, targetHeight) {
   const cents = [];       // 每三角形质心（x,y,z 依次）
   const triRegion = [];   // 每三角形按直线规则的区域号
   const nrm = [];         // 每三角形面法线（断口细化时算折痕）
+  const area = [];        // 每三角形面积（零件朝向 / 质心加权）
   const edgeTris = new Map();
   const REG_ID = new Map(REGIONS.map((r, i) => [r, i]));
 
@@ -204,6 +210,7 @@ export function splitArmorMeshes(meshes, targetHeight) {
       tris.push({ srcIdx: si, src, i0, i1, i2, W });
       cents.push(cx, cy, cz);
       nrm.push(nx / nl, ny / nl, nz / nl);
+      area.push(nl * 0.5);
       triRegion.push(REG_ID.get(classify(cx, cy, cz, height)) ?? -1);
       for (const [p, r] of [[W[i0], W[i1]], [W[i1], W[i2]], [W[i2], W[i0]]]) {
         const key = base + (p < r ? p * V + r : r * V + p);
@@ -241,22 +248,12 @@ export function splitArmorMeshes(meshes, targetHeight) {
     islands.push(comp);
   }
 
-  // 4.4 岛屿归属：多数区域投票；一致率不足的（跨区域大岛）回退逐三角形切分
-  const buckets = new Map();
-  for (const id of REGIONS) buckets.set(id, { tris: [], sum: new THREE.Vector3(), count: 0 });
+  // 4.4 岛屿归属：多数区域投票；一致率不足的（跨区域大岛）按折痕细化后的标签切段
+  //     这里保留「单元」而不立刻按区域合并 —— 拆解粒度要靠后面的零件级合并控制，
+  //     7 个大模块整体平移会让断口像被撕开，零件级逐片弹开才是拆卸。
+  const units = [];         // { region, list: 全局三角形下标[] }
   const AGREE = 0.8;        // 一致率 ≥ 此值 → 整岛归属多数区域
   const vote = new Int32Array(REGIONS.length);
-  const addTris = (region, list) => {
-    const bucket = buckets.get(region);
-    for (const t of list) {
-      const tri = tris[t];
-      bucket.tris.push({ src: tri.src, i0: tri.i0, i1: tri.i1, i2: tri.i2 });
-      bucket.sum.x += cents[t * 3];
-      bucket.sum.y += cents[t * 3 + 1];
-      bucket.sum.z += cents[t * 3 + 2];
-      bucket.count++;
-    }
-  };
 
   let wholeIslands = 0, splitIslands = 0, largestIsland = 0;
   const bigSplits = [];   // 跨区域大岛明细（调试用）
@@ -334,7 +331,7 @@ export function splitArmorMeshes(meshes, targetHeight) {
     for (let r = 0; r < vote.length; r++) if (vote[r] > bestN) { bestN = vote[r]; best = r; }
     if (best >= 0 && valid && bestN / valid >= AGREE) {
       wholeIslands++;
-      addTris(REGIONS[best], comp);
+      units.push({ region: REGIONS[best], list: comp });
     } else {
       // 跨区域大岛：细化断口后按局部标签分桶（断口沿甲片沟槽走）
       splitIslands++;
@@ -353,7 +350,7 @@ export function splitArmorMeshes(meshes, targetHeight) {
         if (!arr) byRegion.set(r, (arr = []));
         arr.push(comp[i]);
       }
-      for (const [r, arr] of byRegion) addTris(REGIONS[r], arr);
+      for (const [r, arr] of byRegion) units.push({ region: REGIONS[r], list: arr });
     }
   }
   splitStats = {
@@ -366,17 +363,77 @@ export function splitArmorMeshes(meshes, targetHeight) {
     refineChanged,
   };
 
-  // ---- 阶段 5：每区域合并构建子几何（顶点减去区域中心） ----
+  // ---- 阶段 5：单元 → 零件（同区域 + 质心近 + 朝向近似才合并） ----
+  // 每个单元先算面积加权质心与面积加权法线 —— 法线就是「这片甲片朝哪边」，
+  // 拆解时让每片沿自己的朝向弹开，而不是整块区域朝一个方向平移。
+  const unitInfo = units.map((u) => {
+    let sx = 0, sy = 0, sz = 0, wsum = 0, nx = 0, ny = 0, nz = 0;
+    for (const t of u.list) {
+      const a = area[t];
+      sx += cents[t * 3] * a; sy += cents[t * 3 + 1] * a; sz += cents[t * 3 + 2] * a;
+      nx += nrm[t * 3] * a; ny += nrm[t * 3 + 1] * a; nz += nrm[t * 3 + 2] * a;
+      wsum += a;
+    }
+    const inv = 1 / (wsum || 1);
+    const center = new THREE.Vector3(sx * inv, sy * inv, sz * inv);
+    const normal = new THREE.Vector3(nx, ny, nz);
+    if (normal.lengthSq() < 1e-9) normal.set(0, 0, 1); else normal.normalize();
+    // 个别内衬件法线朝内：翻到朝外，否则拆解时它往身体里钻
+    const outward = new THREE.Vector3(center.x, 0, center.z);
+    if (outward.lengthSq() < 1e-6) outward.set(0, center.y > height * 0.5 ? 1 : -1, 0);
+    if (normal.dot(outward) < 0) normal.negate();
+    return { region: u.region, list: u.list, area: wsum, center, normal };
+  });
+
+  // 合并：把碎了的小甲片（螺栓、缝隙里的薄片）并到相邻的大片上，控制零件数；
+  // 大片本身面积大，先落位当种子，不会互相吞并。
+  // 碎屑（三角形数很少的孤岛）无条件并到最近的种子 —— 否则拆解时会飘成一堆白点，
+  // 看起来像「碎渣」而不是零件，这也是原效果像被撕烂的原因之一。
+  const CELL = height * 0.17;
+  const TINY_TRIS = 70;
+  const seeds = [];
+  const order = unitInfo.map((u, i) => i).sort((a, b) => unitInfo[b].area - unitInfo[a].area);
+  for (const i of order) {
+    const u = unitInfo[i];
+    const tiny = u.list.length < TINY_TRIS;
+    let best = null, bestD = Infinity;
+    for (const s of seeds) {
+      if (!tiny && s.region !== u.region) continue;     // 碎屑可以跨区域归并
+      const d = s.center.distanceTo(u.center);
+      const lim = tiny ? CELL * 3.2 : CELL * 1.6;
+      if (d > lim || d >= bestD) continue;
+      if (!tiny && s.normal.dot(u.normal) < 0.32) continue;   // 朝向差太多 → 另一片甲
+      bestD = d; best = s;
+    }
+    if (!best) { seeds.push(u); continue; }
+    const w = best.area + u.area;
+    best.center.lerp(u.center, u.area / w);
+    best.normal.multiplyScalar(best.area).addScaledVector(u.normal, u.area);
+    if (best.normal.lengthSq() > 1e-9) best.normal.normalize();
+    for (const t of u.list) best.list.push(t);
+    best.area = w;
+  }
+
+  // ---- 阶段 6：每零件构建子几何（顶点减去该零件质心） ----
   const out = new Map();
-  for (const [region, bucket] of buckets) {
-    if (bucket.tris.length === 0) continue;
-    const center = bucket.sum.multiplyScalar(1 / bucket.count);
-    out.set(region, {
-      geometry: buildRegionGeometry(bucket.tris, center),
-      center,
-      material: bucket.tris[0].src.mesh.material,
+  let n = 0;
+  for (const s of seeds) {
+    if (!s.list.length) continue;
+    const list = s.list.map((t) => {
+      const tri = tris[t];
+      return { src: tri.src, i0: tri.i0, i1: tri.i1, i2: tri.i2 };
+    });
+    out.set(`${s.region}#${n++}`, {
+      region: s.region,
+      geometry: buildRegionGeometry(list, s.center),
+      center: s.center,
+      normal: s.normal,
+      area: s.area,
+      tris: list.length,
+      material: tris[s.list[0]].src.mesh.material,
     });
   }
+  splitStats.pieces = out.size;
   return out;
 }
 
