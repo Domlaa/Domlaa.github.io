@@ -14,7 +14,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { splitArmorMeshes, SPLIT_DEFS } from './segment.js';
+import { splitArmorMeshes, getSplitStats, SPLIT_DEFS } from './segment.js';
 
 const CONFIG = {
   // 相对「文档」解析（不是相对本模块）：两页都在站点根目录，用 ./assets 可同时
@@ -494,10 +494,14 @@ function frameCamera(height) {
 
   const vh = innerHeight || 900;
   const safeTop = narrow ? 120 : CONFIG.safeTop;
-  const safeBottom = narrow ? 150 : CONFIG.safeBottom;
+  // 底部安全区按工具栏的实际高度算（按钮数量变化时不会把脚部遮住）
+  const tb = document.querySelector('.toolbar');
+  const tbTop = tb ? tb.getBoundingClientRect().top : 0;
+  const measured = tbTop > 0 ? vh - tbTop + 16 : 0;
+  const safeBottom = measured || (narrow ? 150 : CONFIG.safeBottom);
   const pxPerUnit = vh / (2 * Math.tan(vFov / 2) * d);
   const shift = ((safeBottom - safeTop) / 2) / pxPerUnit;
-  state.fit.targetY = height * 0.5 - Math.min(shift, height * 0.12);
+  state.fit.targetY = height * 0.5 - Math.min(shift, height * (narrow ? 0.22 : 0.12));
 
   controls.minDistance = d * 0.34;
   controls.maxDistance = d * 2.6;
@@ -566,10 +570,11 @@ async function boot() {
 
     root.updateMatrixWorld(true);   // 骨骼静止姿态需要 matrixWorld
 
-    // 单块蒙皮网格 → 烘焙蒙皮 → 归一化 → 按空间位置切成 9 个模块
+    // 单块蒙皮网格 → 烘焙蒙皮 → 归一化 → 连通域岛屿切分成 7 个模块
     const armorMeshes = [];
     root.traverse((o) => { if (o.isMesh && o.visible) armorMeshes.push(o); });
     const pieces = splitArmorMeshes(armorMeshes, CONFIG.targetHeight);
+    window.__splitStats = getSplitStats();
 
     const group = new THREE.Group();
     state.modules = [];

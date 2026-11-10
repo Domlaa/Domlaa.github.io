@@ -3,8 +3,11 @@
  *
  * mk7 的 armor2.glb 是「单块蒙皮网格」，没有部件层级。
  * 关键点：蒙皮网格的渲染位置由骨骼静止姿态决定（bindMatrix/node 矩阵都不可靠），
- * 因此先按 skinIndex/skinWeight 手动烘焙顶点到世界坐标（等价于着色器的蒙皮变换），
- * 再按三角面质心划分到 9 个身体区域，每个区域一个可独立位移的模块。
+ * 因此先按 skinIndex/skinWeight 手动烘焙顶点到世界坐标（等价于着色器的蒙皮变换）。
+ *
+ * 区域划分用「连通域（岛屿）切分」：焊接重合顶点后按共享边洪水填充，
+ * 几何上连成一片的甲片整块归属同一模块（切口沿建模留出的甲片缝隙走，
+ * 不会把甲片拦腰切断）；只有跨区域的大岛才回退为直线切分。
  *
  * 归一化在烘焙坐标上完成（高 1.95、贴地、居中），子网格顶点减去区域中心，
  * pivot.position = center + offset * H * t —— 位移恒为绝对量，反复拆装无累积误差。
@@ -12,6 +15,10 @@
 import * as THREE from 'three';
 
 export const REGIONS = ['helmet', 'chest', 'back', 'armL', 'armR', 'legL', 'legR'];
+
+/** 最近一次切分的统计（islands / wholeIslands / splitIslands / largestIsland / tris） */
+let splitStats = null;
+export function getSplitStats() { return splitStats; }
 
 /**
  * 拆解定义：offset/rotate 为相对模型总高 H 的比例（沿用 index 页调好的参数）
@@ -138,34 +145,226 @@ export function splitArmorMeshes(meshes, targetHeight) {
     if (b.wn) b.mesh.geometry.setAttribute('normal', new THREE.BufferAttribute(b.wn, 3));
   }
 
-  // ---- 阶段 4：按三角面质心分桶 ----
+  // ---- 阶段 4：连通域（岛屿）切分 —— 切口沿建模留出的甲片缝隙走 ----
+  // 旧方案用直线平面（高度/左右/前后阈值）逐三角形切分，切口会从连续甲片
+  // 中间穿过，视觉上像「撕开」。新方案：
+  //   a) 焊接重合顶点（UV 缝/硬边会产生重复顶点，破坏连通性判断）
+  //   b) 用共享边建立三角形邻接表，洪水填充出几何连通的「岛屿」
+  //      —— 建模时留有缝隙的甲片天然是独立岛屿，永远不会被切穿
+  //   c) 整岛按三角形区域投票归属；只有跨区域明显的大岛才回退为
+  //      逐三角形直线切分（如胸/背共用的整圈躯干壳体）
   const height = targetHeight;
-  const buckets = new Map();
-  for (const id of REGIONS) buckets.set(id, { tris: [], sum: new THREE.Vector3(), count: 0 });
 
-  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
-  const cen = new THREE.Vector3();
+  // 4.1 顶点焊接：量化位置相同的顶点视为同一点（仅在同源网格内焊接）
+  const welds = baked.map((b) => {
+    const pos = b.mesh.geometry.getAttribute('position');
+    const q = height * 5e-5;   // 焊接容差 ≈ 0.1mm，不会把分离的甲片焊到一起
+    const map = new Map();
+    const w = new Int32Array(pos.count);
+    for (let i = 0; i < pos.count; i++) {
+      const key = Math.round(pos.getX(i) / q) + ',' + Math.round(pos.getY(i) / q) + ',' + Math.round(pos.getZ(i) / q);
+      let id = map.get(key);
+      if (id === undefined) { id = map.size; map.set(key, id); }
+      w[i] = id;
+    }
+    return { w, V: pos.count + 1 };
+  });
 
-  for (const src of baked) {
+  // 4.2 收集三角形：质心、面法线、直线规则区域号、边 → 三角形邻接表
+  const tris = [];        // { src, i0, i1, i2, W }（W = 该源网格的焊接 id 表）
+  const cents = [];       // 每三角形质心（x,y,z 依次）
+  const triRegion = [];   // 每三角形按直线规则的区域号
+  const nrm = [];         // 每三角形面法线（断口细化时算折痕）
+  const edgeTris = new Map();
+  const REG_ID = new Map(REGIONS.map((r, i) => [r, i]));
+
+  for (let si = 0; si < baked.length; si++) {
+    const src = baked[si];
     const pos = src.mesh.geometry.getAttribute('position');
     const index = src.mesh.geometry.getIndex();
+    const W = welds[si].w;
+    const V = welds[si].V;
+    const base = si * 1e12;   // 邻接键带源前缀：跨源网格永不连通
     const triCount = index ? index.count / 3 : pos.count / 3;
     for (let i = 0; i < triCount; i++) {
       const i0 = index ? index.getX(i * 3) : i * 3;
       const i1 = index ? index.getX(i * 3 + 1) : i * 3 + 1;
       const i2 = index ? index.getX(i * 3 + 2) : i * 3 + 2;
-      a.fromBufferAttribute(pos, i0);
-      b.fromBufferAttribute(pos, i1);
-      c.fromBufferAttribute(pos, i2);
-      cen.copy(a).add(b).add(c).multiplyScalar(1 / 3);
-      if (!Number.isFinite(cen.x + cen.y + cen.z)) continue;
-      const region = classify(cen.x, cen.y, cen.z, height);
-      const bucket = buckets.get(region);
-      bucket.tris.push({ src, i0, i1, i2 });
-      bucket.sum.add(cen);
-      bucket.count++;
+      const x0 = pos.getX(i0), y0 = pos.getY(i0), z0 = pos.getZ(i0);
+      const x1 = pos.getX(i1), y1 = pos.getY(i1), z1 = pos.getZ(i1);
+      const x2 = pos.getX(i2), y2 = pos.getY(i2), z2 = pos.getZ(i2);
+      const cx = (x0 + x1 + x2) / 3, cy = (y0 + y1 + y2) / 3, cz = (z0 + z1 + z2) / 3;
+      if (!Number.isFinite(cx + cy + cz)) continue;
+      // 面法线（未归一化也可，只用来比较相邻面的夹角）
+      const ux = x1 - x0, uy = y1 - y0, uz = z1 - z0;
+      const vx = x2 - x0, vy = y2 - y0, vz = z2 - z0;
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const nl = Math.hypot(nx, ny, nz) || 1;
+      const t = tris.length;
+      tris.push({ srcIdx: si, src, i0, i1, i2, W });
+      cents.push(cx, cy, cz);
+      nrm.push(nx / nl, ny / nl, nz / nl);
+      triRegion.push(REG_ID.get(classify(cx, cy, cz, height)) ?? -1);
+      for (const [p, r] of [[W[i0], W[i1]], [W[i1], W[i2]], [W[i2], W[i0]]]) {
+        const key = base + (p < r ? p * V + r : r * V + p);
+        let arr = edgeTris.get(key);
+        if (!arr) edgeTris.set(key, (arr = []));
+        arr.push(t);
+      }
     }
   }
+
+  // 4.3 洪水填充连通域
+  const visited = new Uint8Array(tris.length);
+  const islands = [];
+  const stack = [];
+  for (let seed = 0; seed < tris.length; seed++) {
+    if (visited[seed]) continue;
+    const comp = [];
+    stack.length = 0;
+    stack.push(seed);
+    visited[seed] = 1;
+    while (stack.length) {
+      const t = stack.pop();
+      comp.push(t);
+      const cur = tris[t];
+      const base = cur.srcIdx * 1e12;
+      const V = welds[cur.srcIdx].V;
+      const W = cur.W;
+      for (const [p, r] of [[W[cur.i0], W[cur.i1]], [W[cur.i1], W[cur.i2]], [W[cur.i2], W[cur.i0]]]) {
+        const key = base + (p < r ? p * V + r : r * V + p);
+        for (const nb of edgeTris.get(key)) {
+          if (!visited[nb]) { visited[nb] = 1; stack.push(nb); }
+        }
+      }
+    }
+    islands.push(comp);
+  }
+
+  // 4.4 岛屿归属：多数区域投票；一致率不足的（跨区域大岛）回退逐三角形切分
+  const buckets = new Map();
+  for (const id of REGIONS) buckets.set(id, { tris: [], sum: new THREE.Vector3(), count: 0 });
+  const AGREE = 0.8;        // 一致率 ≥ 此值 → 整岛归属多数区域
+  const vote = new Int32Array(REGIONS.length);
+  const addTris = (region, list) => {
+    const bucket = buckets.get(region);
+    for (const t of list) {
+      const tri = tris[t];
+      bucket.tris.push({ src: tri.src, i0: tri.i0, i1: tri.i1, i2: tri.i2 });
+      bucket.sum.x += cents[t * 3];
+      bucket.sum.y += cents[t * 3 + 1];
+      bucket.sum.z += cents[t * 3 + 2];
+      bucket.count++;
+    }
+  };
+
+  let wholeIslands = 0, splitIslands = 0, largestIsland = 0;
+  const bigSplits = [];   // 跨区域大岛明细（调试用）
+
+  /* 跨区域大岛（连续壳体，例如整圈躯干、骨盆与大腿）必须切开，但「直刀」
+   * 按三角形离散化后会切出一圈锯齿尖刺。这里在岛内做一次折痕寻路的标签
+   * 细化（ICM）：
+   *   E = Σ_t [标签 ≠ 直线规则标签]·λ  +  Σ_边 β(折痕)·[两端标签不同]
+   * β 在平滑面上 ≈1、在锐利折痕上 ≈0.03 —— 于是断口会主动贴到甲片分模线，
+   * 只在没有沟槽可走时才勉强直切。 */
+  const slot = new Int32Array(tris.length).fill(-1);   // 全局 tri → 岛内局部下标（复用）
+  let refineChanged = 0;                              // 折痕细化改动的三角形总数（统计）
+  const refineIslandLabels = (comp) => {
+    const local = new Int8Array(comp.length);   // 局部下标 → 区域号
+    const cand = [];
+    for (let i = 0; i < comp.length; i++) {
+      const r = triRegion[comp[i]];
+      local[i] = r;
+      if (r >= 0 && cand.indexOf(r) < 0) cand.push(r);
+    }
+    if (cand.length < 2) return local;
+
+    const LAMBDA = 0.45;       // 偏离直线规则的数据项代价
+    for (let i = 0; i < comp.length; i++) slot[comp[i]] = i;
+
+    let flips = 0;
+    for (let iter = 0; iter < 24; iter++) {
+      let changed = 0;
+      for (let i = 0; i < comp.length; i++) {
+        const t = comp[i];
+        const plane = triRegion[t];
+        if (plane < 0) continue;
+        const tri = tris[t];
+        const W = tri.W;
+        const V = welds[tri.srcIdx].V;
+        const base = tri.srcIdx * 1e12;
+        const tx = nrm[t * 3], ty = nrm[t * 3 + 1], tz = nrm[t * 3 + 2];
+        // 邻居 + 折痕权重
+        const nbIdx = [], nbBeta = [];
+        for (const [p, r] of [[W[tri.i0], W[tri.i1]], [W[tri.i1], W[tri.i2]], [W[tri.i2], W[tri.i0]]]) {
+          const key = base + (p < r ? p * V + r : r * V + p);
+          const list = edgeTris.get(key);
+          if (!list || list.length < 2) continue;
+          for (const nb of list) {
+            if (nb === t) continue;
+            const li = slot[nb];
+            if (li < 0) continue;
+            const dot = tx * nrm[nb * 3] + ty * nrm[nb * 3 + 1] + tz * nrm[nb * 3 + 2];
+            const crease = 1 - Math.max(-1, Math.min(1, dot));   // 0=共面 1=90° 2=反折
+            nbIdx.push(li);
+            nbBeta.push(1 - 0.97 * Math.min(1, crease / 0.6));
+          }
+        }
+        let bestL = local[i], bestC = Infinity;
+        for (const c of cand) {
+          let cost = c === plane ? 0 : LAMBDA;
+          for (let k = 0; k < nbIdx.length; k++) if (local[nbIdx[k]] !== c) cost += nbBeta[k];
+          if (cost < bestC - 1e-9) { bestC = cost; bestL = c; }
+        }
+        if (bestL !== local[i]) { local[i] = bestL; changed++; }
+      }
+      flips += changed;
+      if (!changed) break;
+    }
+    refineChanged += flips;
+    for (let i = 0; i < comp.length; i++) slot[comp[i]] = -1;   // 归还映射
+    return local;
+  };
+  for (const comp of islands) {
+    if (comp.length > largestIsland) largestIsland = comp.length;
+    vote.fill(0);
+    let valid = 0;
+    for (const t of comp) { const r = triRegion[t]; if (r >= 0) { vote[r]++; valid++; } }
+    let best = -1, bestN = 0;
+    for (let r = 0; r < vote.length; r++) if (vote[r] > bestN) { bestN = vote[r]; best = r; }
+    if (best >= 0 && valid && bestN / valid >= AGREE) {
+      wholeIslands++;
+      addTris(REGIONS[best], comp);
+    } else {
+      // 跨区域大岛：细化断口后按局部标签分桶（断口沿甲片沟槽走）
+      splitIslands++;
+      if (comp.length >= 400) {
+        bigSplits.push({
+          size: comp.length,
+          mix: REGIONS.map((r, i) => [r, vote[i]]).filter(([, n]) => n > 0),
+        });
+      }
+      const local = refineIslandLabels(comp);
+      const byRegion = new Map();
+      for (let i = 0; i < comp.length; i++) {
+        const r = local[i];
+        if (r < 0) continue;
+        let arr = byRegion.get(r);
+        if (!arr) byRegion.set(r, (arr = []));
+        arr.push(comp[i]);
+      }
+      for (const [r, arr] of byRegion) addTris(REGIONS[r], arr);
+    }
+  }
+  splitStats = {
+    islands: islands.length,
+    wholeIslands,
+    splitIslands,
+    largestIsland,
+    tris: tris.length,
+    bigSplits: bigSplits.sort((x, y) => y.size - x.size).slice(0, 8),
+    refineChanged,
+  };
 
   // ---- 阶段 5：每区域合并构建子几何（顶点减去区域中心） ----
   const out = new Map();

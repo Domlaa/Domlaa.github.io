@@ -168,7 +168,7 @@ body {
     width: calc(100vw - 22px); padding: 7px 8px; border-radius: 16px;
     flex-direction: column; align-items: stretch; gap: 6px;
   }
-  .tb-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+  .tb-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
   .toolbar button { font-size: 11px; padding: 8px 4px; }
   .tb-sliders { width: 100%; flex-direction: column; align-items: stretch; gap: 5px; border-left: 0; padding-left: 0; }
   .slider { justify-content: space-between; padding: 0 2px; }
