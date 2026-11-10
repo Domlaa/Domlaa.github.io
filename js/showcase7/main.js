@@ -29,6 +29,8 @@ const CONFIG = {
   safeTop: 30,
   safeBottom: 104,
   fitScale: 1,          // 取景距离倍率：宽体/厚深度模型（如反浩克）需 >1 才不被裁切；1 = 原行为
+  rot0: 0,              // 初始朝向（度）：并排多展位时错开起始相位，避免同步旋转
+  flat: false,          // 结构线模式：丢弃贴图，装甲换成同一套素模材质（只留几何轮廓线）
 };
 
 // 允许覆盖模型路径：优先级 ?model=… 查询参数 > 引入脚本的 data-model 属性 > CONFIG 默认值。
@@ -48,6 +50,14 @@ const CONFIG = {
   const fitOverride = u.get('fit') || (scriptEl() && scriptEl().dataset.fit);
   const fitNum = Number(fitOverride);
   if (fitOverride && fitNum > 0) CONFIG.fitScale = fitNum;
+
+  // 初始朝向（?rot=-24 / data-rot），单位度
+  const rotOverride = u.get('rot') || (scriptEl() && scriptEl().dataset.rot);
+  const rotNum = Number(rotOverride);
+  if (rotOverride && Number.isFinite(rotNum)) CONFIG.rot0 = rotNum;
+
+  // 结构线模式（?flat=1）：不吃贴图，多材质模型切成单材质后不会出现错贴图黑洞
+  CONFIG.flat = u.get('flat') === '1';
 }
 
 const state = {
@@ -556,6 +566,25 @@ const normalMat = new THREE.MeshNormalMaterial({ side: THREE.FrontSide });
 let model = null;
 const JUNK = /Plane|CreationNulCrew|IK_char_/i;
 
+/**
+ * 结构线模式（?flat=1）：全部部件换成同一套素模材质。
+ * 反浩克这类多材质模型经连通域切分后只剩首个三角形的材质，UV 与图集对不上，
+ * 反照率会出现大片黑洞；直接丢掉贴图后只剩几何轮廓 + 深度边缘，两台装甲观感也一致。
+ */
+function flatten(root) {
+  const cache = new Map();
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    const side = (o.material && o.material.side) || THREE.FrontSide;
+    let m = cache.get(side);
+    if (!m) {
+      m = new THREE.MeshStandardMaterial({ color: 0x3a4653, metalness: 0.0, roughness: 0.86, side });
+      cache.set(side, m);
+    }
+    o.material = m;
+  });
+}
+
 /** 材质处理：降噪反照率 + 法线刻线 + 统一金属参数 */
 function dress(root) {
   root.traverse((o) => {
@@ -697,7 +726,7 @@ async function boot() {
       o.frustumCulled = false;   // 蒙皮网格包围盒不可靠
     });
 
-    dress(root);
+    if (CONFIG.flat) flatten(root); else dress(root);
 
     let tris = 0, meshes = 0;
     root.traverse((o) => {
@@ -739,6 +768,7 @@ async function boot() {
       });
     }
     scene.add(group);
+    group.rotation.y = THREE.MathUtils.degToRad(CONFIG.rot0);
     model = group;
 
     frameCamera(CONFIG.targetHeight);

@@ -4,13 +4,16 @@
   HALOFLUX - Copyright (c) 2026 Ryder191 (RYDER CODE / Ms MAIKEBAIs CAT)
   https://github.com/Ryder191/haloflux · PolyForm Noncommercial License 1.0.0（仅限非商业用途）
   本页保留 HALOFLUX 原有控制台设计（头部 KPI / 舞台光环 / 底部面板），
-  舞台中央嵌入 MARK VII 线稿装甲（mk7.html?embed=1，透明 iframe）。
+  舞台左右两个展位各嵌一台装甲（mk7.html?embed=1 透明 iframe，均为 model/tiny 压缩模型）：
+    左 · MARK XLIV HULK BUSTER（hulk+buster2_optimized.glb，宽体 → fit 放大取景距离）
+    右 · MARK VII（irobny2_optimized.glb）
+  两者都走「仅线条 + 素模」投影（line=1 & flat=1），保留自动旋转与线条流光。
 -->
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MK VII · Jarvis Console</title>
+<title>MARK XLIV / MARK VII · Jarvis Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
@@ -60,22 +63,41 @@ header{display:grid;grid-template-columns:minmax(240px,1.7fr) repeat(5,minmax(0,
 @keyframes eqb{0%,100%{height:2px}50%{height:8px}}
 .music input[type=range]{width:70px;height:10px;margin:0;accent-color:#cfd2d8;cursor:pointer}
 .music .mval{width:16px;text-align:right;color:var(--dim);font-variant-numeric:tabular-nums}
-.status{right:16px;bottom:12px;text-align:right}
+.status{right:16px;bottom:12px;text-align:right;text-shadow:0 1px 6px rgba(0,0,0,.92),0 0 12px rgba(0,0,0,.7)}
 .status .big{font-size:11px;color:var(--white);font-weight:800}
 .status .sm{color:var(--dim);font-size:8px;margin-top:2px}
 
-/* ---------- MK VII 装甲层（透明 iframe，浮在光环中央） ---------- */
+/* ---------- 双装甲展位：左反浩克 / 右 MK VII（透明 iframe，纯线条） ---------- */
 /* 舞台整体压暗一档：光环退为承载台，装甲才是主体 */
-.stage > canvas#stage{filter:brightness(.86) saturate(.92)}
-.armorveil{position:absolute;inset:0;pointer-events:none;z-index:1;
-  background:radial-gradient(ellipse 34% 52% at 50% 50%,rgba(5,6,8,.78) 0%,rgba(5,6,8,.5) 46%,rgba(5,6,8,.14) 72%,transparent 86%)}
-#armor{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-  width:min(50%,82vh);height:88%;border:0;background:transparent;z-index:2}
-#armor.loading{opacity:0;transition:opacity .8s ease .1s}
-#armor.on{opacity:1}
-/* 浮动标注牌滑到装甲后面，避免压在胸口 */
-.chk{z-index:1}
-@media (max-width:1000px){ #armor{width:min(92%,66vh);height:92%} }
+.stage > canvas#stage{filter:brightness(.72) saturate(.84)}
+.rigs{position:absolute;inset:0;z-index:2;display:grid;grid-template-columns:1fr 1fr;pointer-events:none}
+.rig{position:relative;margin:0;min-width:0;overflow:hidden}
+/* 展位暗场：只罩住装甲轮廓所在的一段，光环在两侧和中缝继续透出 */
+.rig::before{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;
+  background:radial-gradient(ellipse 31% 55% at 50% 46%,rgba(5,6,8,.88) 0%,rgba(5,6,8,.66) 44%,rgba(5,6,8,.22) 70%,transparent 88%)}
+.rig iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:transparent;
+  display:block;z-index:1;pointer-events:auto}
+.rig iframe.loading{opacity:0}
+.rig iframe.on{opacity:1;transition:opacity .9s ease}
+/* 中缝：发丝分隔线，上下渐隐 */
+.rigs::after{content:"";position:absolute;left:50%;top:7%;bottom:11%;width:1px;transform:translateX(-.5px);z-index:3;
+  pointer-events:none;
+  background:linear-gradient(180deg,transparent,rgba(207,210,216,.22) 16%,rgba(207,210,216,.22) 84%,transparent)}
+.rig-tag{position:absolute;bottom:8px;z-index:3;
+  display:flex;align-items:center;gap:7px;padding:3px 9px;border:1px solid var(--line2);
+  background:rgba(8,9,11,.74);font-size:9px;letter-spacing:1.4px;white-space:nowrap;pointer-events:none}
+/* 两个标签贴着中缝站：右侧展位被右下角状态块占满，只有中缝一带永远干净 */
+.rig[data-side="l"] .rig-tag{right:12px}
+.rig[data-side="r"] .rig-tag{left:12px}
+.rig-tag i{width:5px;height:5px;display:block;background:var(--dim);animation:syn 1.1s steps(1) infinite}
+.rig.ready .rig-tag i{animation:none;background:var(--teal)}
+.rig-tag b{color:var(--white);font-weight:800}
+.rig-tag span{color:var(--dim);font-size:8px;letter-spacing:1.1px}
+@keyframes syn{50%{opacity:.15}}
+/* 浮动标注牌浮在展位之上（装甲已移到两侧，不再压胸口） */
+.chk{z-index:4}
+/* 窄屏时右下角状态块会占满展位底部，标签直接收掉，避免叠字 */
+@media (max-width:1150px){ .rig-tag{display:none} }
 
 /* ---------- panels ---------- */
 .panels{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:8px 12px 12px;border-top:1px solid var(--line);background:#0a0b0d}
@@ -147,8 +169,22 @@ header{display:grid;grid-template-columns:minmax(240px,1.7fr) repeat(5,minmax(0,
 
   <div class="stage" id="stageWrap">
     <canvas id="stage"></canvas>
-    <div class="armorveil"></div>
-    <iframe id="armor" class="loading" src="mk7.html?embed=1" title="MARK VII 结构线稿装甲" scrolling="no" tabindex="-1"></iframe>
+    <div class="rigs" id="rigs">
+      <!-- 左：MARK XLIV 反浩克 · 右：MARK VII。均用 model/tiny 压缩模型 + 仅线条投影。
+           fit 按模型宽深比给：反浩克是宽体，取景距离要 ×1.36 才不被裁切。 -->
+      <figure class="rig" data-side="l">
+        <iframe class="rig-frame loading" scrolling="no" tabindex="-1"
+                src="mk7.html?embed=1&amp;line=1&amp;flat=1&amp;auto=1&amp;rot=-24&amp;fit=1.36&amp;model=model/tiny/hulk%2Bbuster2_optimized.glb"
+                title="MARK XLIV HULK BUSTER 结构线稿装甲"></iframe>
+        <figcaption class="rig-tag"><i></i><b>MARK XLIV</b><span>HULK BUSTER</span></figcaption>
+      </figure>
+      <figure class="rig" data-side="r">
+        <iframe class="rig-frame loading" scrolling="no" tabindex="-1"
+                src="mk7.html?embed=1&amp;line=1&amp;flat=1&amp;auto=1&amp;rot=26&amp;fit=1.0&amp;model=model/tiny/irobny2_optimized.glb"
+                title="MARK VII 结构线稿装甲"></iframe>
+        <figcaption class="rig-tag"><i></i><b>MARK VII</b><span>EDGE LINE</span></figcaption>
+      </figure>
+    </div>
     <div class="ov console">◱ CONSOLE</div>
     <div class="ov music" id="bgm">
       <span class="mbtn" id="bgmBtn" title="开/关背景音乐（M 键）"><i class="eq"><b></b><b></b><b></b></i><em id="bgmTxt">BGM OFF</em></span>
@@ -1216,7 +1252,8 @@ function drawCallout() {
   const a = -thS * 0.32;
   const anchor = toScreen(cx + Math.cos(a) * (RO + 30), cy + Math.sin(a) * (RO + 30));
   const box = toScreen(cx + Math.cos(a) * (RO + 30) + 120, cy + Math.sin(a) * (RO + 30) - 40);
-  const bx = Math.min(W - 190, Math.max(8, box.x)), by = Math.min(H - 60, Math.max(40, box.y));
+  // 标注牌限制在左半场：右半场留给 MARK VII 与右下角状态块，避免压住装甲 / 叠字
+  const bx = Math.min(Math.min(W - 190, W * 0.44), Math.max(8, box.x)), by = Math.min(H - 60, Math.max(40, box.y));
   chkEl.style.transform = `translate(${bx}px,${by}px)`;
   S.strokeStyle = 'rgba(230,233,238,.55)'; S.lineWidth = 0.8;
   S.beginPath(); S.moveTo(anchor.x, anchor.y); S.lineTo(bx, by + 12); S.stroke();
@@ -1735,17 +1772,31 @@ document.addEventListener('keydown', e => {
 })();
 </script>
 
-<!-- MK VII 装甲层：等嵌入页加载完成（mk7.html?embed=1 postMessage）后再淡入 -->
+<!-- 装甲层：两个嵌入页各自 postMessage('mk7-ready') 后淡入；模型已缓存时用轮询兜底 -->
 <script>
 (function () {
-  var fr = document.getElementById('armor');
-  function show() { fr.classList.remove('loading'); fr.classList.add('on'); }
+  var frames = [].slice.call(document.querySelectorAll('.rig-frame'));
+  function show(fr) {
+    if (fr.classList.contains('on')) return;
+    fr.classList.remove('loading');
+    fr.classList.add('on');
+    var rig = fr.closest('.rig');
+    if (rig) rig.classList.add('ready');
+  }
   window.addEventListener('message', function (e) {
-    if (e.data && e.data.type === 'mk7-ready') show();
+    if (!e.data || e.data.type !== 'mk7-ready') return;
+    for (var i = 0; i < frames.length; i++) {
+      try { if (frames[i].contentWindow === e.source) show(frames[i]); } catch (err) {}
+    }
   });
-  // 兜底：模型已缓存时 iframe 可能早于监听就绪
   var t = setInterval(function () {
-    try { if (fr.contentWindow.__MK7 && fr.contentWindow.__MK7.state.ready) { show(); clearInterval(t); } } catch (err) {}
+    var left = 0;
+    for (var i = 0; i < frames.length; i++) {
+      var fr = frames[i];
+      try { if (fr.contentWindow.__MK7 && fr.contentWindow.__MK7.state.ready) show(fr); } catch (err) {}
+      if (!fr.classList.contains('on')) left++;
+    }
+    if (!left) clearInterval(t);
   }, 1200);
 })();
 </script>
