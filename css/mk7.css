@@ -132,6 +132,20 @@ body {
 .picker input[type="color"]::-moz-color-swatch { border: none; border-radius: 50%; }
 
 .slider input[type="range"]:disabled { opacity: .35; cursor: default; }
+
+/* ---------- 嵌入模式（?embed=1）：宿主页只取装甲本体，HUD 全部隐藏 ---------- */
+body.embed { background: transparent; }
+body.embed .masthead,
+body.embed .stats,
+body.embed .toolbar,
+body.embed .hint,
+body.embed .credit,
+body.embed .back,
+body.embed .loader,
+body.embed .error,
+body.embed .vignette,
+body.embed #jarvis,
+body.embed #jarvisveil { display: none !important; }
 .slider input[type="range"]:disabled::-webkit-slider-thumb { box-shadow: none; }
 .slider input[type="range"]::-moz-range-track { height: 2px; background: rgba(255, 255, 255, .18); }
 .slider input[type="range"]::-moz-range-thumb {

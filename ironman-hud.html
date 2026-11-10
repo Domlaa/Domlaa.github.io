@@ -916,8 +916,23 @@
 
 </div>
 
-<script src="js/three.min.js"></script>
-<script src="js/GLTFLoader.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./lib/three/three.module.js",
+    "three/addons/": "./lib/three/addons/"
+  }
+}
+</script>
+<script type="module">
+  // 站点统一使用本地 ES Modules（无 CDN、免构建）。
+  // 本页其余脚本是经典脚本，所以把 three 挂到全局后再广播就绪事件。
+  import * as THREE from 'three';
+  import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+  // 模块命名空间对象是只读的，展开一份再挂 GLTFLoader（本页按 THREE.GLTFLoader 使用）
+  window.THREE = { ...THREE, GLTFLoader };
+  window.dispatchEvent(new Event('three-ready'));
+</script>
 <script>
   // surface any runtime error instead of leaving a silent blank canvas
   window.addEventListener('error', function (e) {
@@ -928,6 +943,8 @@
   });
 </script>
 <script>
+// 等 three（ES Module）就绪后再启动整页逻辑
+window.addEventListener('three-ready', function () {
   /* ================= clock & data ================= */
   const $ = id => document.getElementById(id);
   setInterval(() => { $('clock').textContent = new Date().toLocaleTimeString('en-GB', { hour12: false }); }, 1000);
@@ -1329,6 +1346,7 @@
     if (lh) lh.textContent = 'PROJECTION UNAVAILABLE';
     console.error(err);
   }
+});   // three-ready
 </script>
 
 <!-- ============ SPATIAL ANALYSIS: isometric XYZ frame ============ -->

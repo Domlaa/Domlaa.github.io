@@ -46,7 +46,7 @@ const state = {
   jarvis: false,        // 贾维斯背景（HALOFLUX；initUI 按设备类型设定初值）
   jarvisMusic: false,   // 贾维斯背景音乐
   jarvisHidBg: false,   // 开贾维斯时是否替用户关掉了 3D 背景（关闭时恢复）
-  jarvisWant: !matchMedia('(pointer: coarse)').matches,  // 期望状态（触屏默认关，省电）
+  jarvisWant: false,    // 贾维斯背景是否默认开（默认关：那个形态已独立成 mk7-console.html）
   time: 0,              // 全局动画时钟（流光 / 背景共用）
   split: false,         // 拆解状态
   modules: [],          // 切分出的装甲模块
@@ -57,6 +57,18 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 
+/* ?embed=1 嵌入模式：被宿主页（如 mk7-console.html 的 haloflux 控制台）以 iframe 引用。
+   只渲染装甲本体：透明背景、无 HUD、无 3D/贾维斯背景层。 */
+const EMBED = new URLSearchParams(location.search).has('embed');
+if (EMBED) {
+  state.embed = true;
+  state.bg = false;
+  state.auto = false;   // 嵌入时不自动转，正对观众（仍可拖拽旋转）
+  state.jarvisWant = false;
+  state.jarvis = false;
+  document.body.classList.add('embed');
+}
+
 /* ------------------------------------------------------------------ */
 /* 渲染器 / 场景                                                        */
 /* ------------------------------------------------------------------ */
@@ -64,7 +76,7 @@ const canvas = $('stage');
 // alpha 画布：合成通道可输出 RT 的 alpha（贾维斯 iframe 背景从画布下面透出来）。
 // premultipliedAlpha:false → 直通 alpha（RT 里装甲 a=1、背景 a≈0，边缘线性过渡）。
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', alpha: true, premultipliedAlpha: false });
-let DPR = Math.min(devicePixelRatio || 1, 2);
+let DPR = Math.min(devicePixelRatio || 1, EMBED ? 1.5 : 2);   // 嵌入时背景是宿主的光环，1.5x 足够
 renderer.setPixelRatio(DPR);
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -335,7 +347,7 @@ const edgeMat = new THREE.ShaderMaterial({
     uLineColor: { value: new THREE.Color(state.lineColor) },
     uTime: { value: 0 },
     uFlow: { value: 0.9 },
-    uTransparent: { value: 0 },
+    uTransparent: { value: EMBED ? 1 : 0 },
     uNear: { value: camera.near },
     uFar: { value: camera.far },
   },
@@ -505,15 +517,20 @@ function frameCamera(height) {
   state.fit.dist = d;
 
   const vh = innerHeight || 900;
-  const safeTop = narrow ? 120 : CONFIG.safeTop;
-  // 底部安全区按工具栏的实际高度算（按钮数量变化时不会把脚部遮住）
-  const tb = document.querySelector('.toolbar');
-  const tbTop = tb ? tb.getBoundingClientRect().top : 0;
-  const measured = tbTop > 0 ? vh - tbTop + 16 : 0;
-  const safeBottom = measured || (narrow ? 150 : CONFIG.safeBottom);
-  const pxPerUnit = vh / (2 * Math.tan(vFov / 2) * d);
-  const shift = ((safeBottom - safeTop) / 2) / pxPerUnit;
-  state.fit.targetY = height * 0.5 - Math.min(shift, height * (narrow ? 0.22 : 0.12));
+  if (state.embed) {
+    // 嵌入模式：iframe 视口即取景框，装甲完整占满，不留 HUD 安全区
+    state.fit.targetY = height * 0.5;
+  } else {
+    const safeTop = narrow ? 120 : CONFIG.safeTop;
+    // 底部安全区按工具栏的实际高度算（按钮数量变化时不会把脚部遮住）
+    const tb = document.querySelector('.toolbar');
+    const tbTop = tb ? tb.getBoundingClientRect().top : 0;
+    const measured = tbTop > 0 ? vh - tbTop + 16 : 0;
+    const safeBottom = measured || (narrow ? 150 : CONFIG.safeBottom);
+    const pxPerUnit = vh / (2 * Math.tan(vFov / 2) * d);
+    const shift = ((safeBottom - safeTop) / 2) / pxPerUnit;
+    state.fit.targetY = height * 0.5 - Math.min(shift, height * (narrow ? 0.22 : 0.12));
+  }
 
   controls.minDistance = d * 0.34;
   controls.maxDistance = d * 2.6;
@@ -624,6 +641,8 @@ async function boot() {
 
     state.ready = true;
     console.info('[MK7] meshes:', meshes, 'tris:', state.tris, 'load ms:', ms);
+    // 嵌入模式：通知宿主页（mk7-console）装甲已就绪，可以把 iframe 揭开
+    if (state.embed) { try { parent.postMessage({ type: 'mk7-ready' }, '*'); } catch {} }
     // 模型就绪后再拉贾维斯背景（38MB 模型优先占带宽；背景晚 0.6s 出现不影响观感）
     if (state.jarvis) setTimeout(jarvisEnsureLoaded, 600);
   } catch (err) {
@@ -1035,8 +1054,8 @@ function initUI() {
     else if (k === 'f') $('btn-full').click();
   });
 
-  // 按设备类型应用贾维斯初值（桌面默认开、触屏默认关）
-  if (state.jarvisWant) setJarvis(true);
+  // 贾维斯背景不再自动启用：那个形态已独立成 mk7-console.html。
+  // 本页保留 J 键 / 「贾维斯」按钮，按需切换到叠加模式。
 
   addEventListener('resize', onResize);
 }
