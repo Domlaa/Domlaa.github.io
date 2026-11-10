@@ -77,7 +77,7 @@ const state = {
   jarvis: false,        // 贾维斯背景（HALOFLUX；initUI 按设备类型设定初值）
   jarvisMusic: false,   // 贾维斯背景音乐
   jarvisHidBg: false,   // 开贾维斯时是否替用户关掉了 3D 背景（关闭时恢复）
-  jarvisWant: false,    // 贾维斯背景是否默认开（默认关：那个形态已独立成 mk7-console.html）
+  jarvisWant: false,    // 贾维斯背景是否默认开（默认关：那个形态已独立成 jarvis-console.html）
   time: 0,              // 全局动画时钟（流光 / 背景共用）
   split: false,         // 拆解状态
   modules: [],          // 切分出的装甲模块
@@ -90,7 +90,7 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 
-/* ?embed=1 嵌入模式：被宿主页（mk7-console / ironman-hud）以 iframe 引用。
+/* ?embed=1 嵌入模式：被宿主页（jarvis-console / ironman-hud）以 iframe 引用。
    默认只渲染装甲本体：透明背景、无 HUD、无 3D/贾维斯背景层、不自动旋转。
    可选参数（ironman-hud 的诊断投影用）：
      panel=1  显示底部控制面板（旋转 / 线条 / 流光 / 背景 / 配色等）
@@ -114,7 +114,7 @@ if (EMBED) {
 }
 
 /* skin=hud：面板文案换成英文（宿主 ironman-hud 是全英文界面）。
-   只在嵌入+该皮肤下生效，mk7.html 主页与 mk7-console 不受影响。 */
+   只在嵌入+该皮肤下生效，mk7.html 主页与 jarvis-console 不受影响。 */
 if (document.body.classList.contains('skin-hud')) {
   const EN = {
     'btn-rotate': ['ROTATE', 'Auto-rotate (Space)'],
@@ -798,7 +798,7 @@ async function boot() {
 
     state.ready = true;
     console.info('[MK7] meshes:', meshes, 'tris:', state.tris, 'load ms:', ms);
-    // 嵌入模式：通知宿主页（mk7-console）装甲已就绪，可以把 iframe 揭开
+    // 嵌入模式：通知宿主页（jarvis-console）装甲已就绪，可以把 iframe 揭开
     if (state.embed) { try { parent.postMessage({ type: 'mk7-ready' }, '*'); } catch {} }
     // 模型就绪后再拉贾维斯背景（38MB 模型优先占带宽；背景晚 0.6s 出现不影响观感）
     if (state.jarvis) setTimeout(jarvisEnsureLoaded, 600);
@@ -1218,7 +1218,7 @@ function initUI() {
     else if (k === 'f') $('btn-full').click();
   });
 
-  // 贾维斯背景不再自动启用：那个形态已独立成 mk7-console.html。
+  // 贾维斯背景不再自动启用：那个形态已独立成 jarvis-console.html。
   // 本页保留 J 键 / 「贾维斯」按钮，按需切换到叠加模式。
 
   addEventListener('resize', onResize);
