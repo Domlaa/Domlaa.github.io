@@ -7,7 +7,7 @@
 | 页面 | 地址 | 模型 | 特点 |
 | --- | --- | --- | --- |
 | 全息拆解展示 | `/` | `assets/models/armor.glb`（1.2 万面） | 全息材质、10 模块拆解、HUD 指示线 |
-| MK7 线稿渲染 | `/mk7.html` | `assets/models/armor2.glb`（14 万面） | 屏幕空间边缘检测、表面线条叠加、暗线/亮线双模式、截图导出 |
+| MK7 线稿渲染 | `/mk7.html` | `assets/models/detail/mk7.glb`（14 万面） | 屏幕空间边缘检测、表面线条叠加、暗线/亮线双模式、截图导出 |
 
 ![tech](https://img.shields.io/badge/Three.js-r187-7de8ff) ![tech](https://img.shields.io/badge/WebGL-2.0-7de8ff) ![tech](https://img.shields.io/badge/build-none-brightgreen)
 
@@ -43,7 +43,17 @@ mk7.html                   MK VII 线稿渲染页
 css/mk7.css                MK VII 页样式
 css/hud.css                HUD 全部样式与响应式
 assets/models/armor.glb    战甲模型（全息页，部署用）
-assets/models/armor2.glb   MK VII 模型（线稿页，38 MB，含 4K PBR 贴图）
+
+### 模型目录分类规则（assets/models/）
+
+| 目录 | 定位 | 纹理 | 体积 | 用途 |
+| --- | --- | --- | --- | --- |
+| `detail/` | 纹理效果最佳、细节完整保留的模型 | 原生不压缩 | 最大 | 追求画质与细节呈现的页面 |
+| `lite/`  | 仅保留基础结构，舍弃纹理效果 | 无纹理 | 最小 | 用于绘制线条（线稿渲染） |
+| `optimized/` | 在二者之间取舍，仅压缩纹理贴图部分 | 压缩纹理 | 居中 | 兼顾画质与加载速度 |
+
+当前分布：`detail/mk7.glb`（原 armor2.glb，38 MB · 4K PBR 贴图）｜`lite/mk7_lite.glb`、`lite/hulk-buster2_lite.glb`（draco 压缩 · 无纹理）｜`optimized/`（2048 webp 纹理版）。
+assets/models/detail/mk7.glb  MK VII 模型（线稿页，38 MB，含 4K PBR 贴图）
 lib/three/                 Three.js r187 + 本地化 addons
 js/
 ├─ main.js                 编排：加载 → 显现 → 渲染循环
@@ -110,7 +120,7 @@ git add -A && git commit -m "feat: 3D 全息战甲展示系统" && git push
 
 ## 九、MK VII 线稿渲染页（`/mk7.html`）
 
-`assets/models/armor2.glb`（38 MB）是重新生成的模型，与前面两个都不同：**142,622 面的单件装甲**（`Iron_Man_mark_7_Subsurf_`，蒙皮网格），带 4 张 4096² 贴图。
+`assets/models/detail/mk7.glb`（38 MB）是重新生成的模型，与前面两个都不同：**142,622 面的单件装甲**（`Iron_Man_mark_7_Subsurf_`，蒙皮网格），带 4 张 4096² 贴图。
 
 ### 这份模型的坑
 

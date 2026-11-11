@@ -1,7 +1,7 @@
 /**
  * segment.js — MK7 装甲空间切分（页面自包含，不依赖 index 页模块）
  *
- * mk7 的 armor2.glb 是「单块蒙皮网格」，没有部件层级。
+ * mk7 的 detail/mk7.glb 是「单块蒙皮网格」，没有部件层级。
  * 关键点：蒙皮网格的渲染位置由骨骼静止姿态决定（bindMatrix/node 矩阵都不可靠），
  * 因此先按 skinIndex/skinWeight 手动烘焙顶点到世界坐标（等价于着色器的蒙皮变换）。
  *

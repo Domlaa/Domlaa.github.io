@@ -20,7 +20,7 @@ import { splitArmorMeshes, getSplitStats, SPLIT_DEFS } from './segment.js';
 const CONFIG = {
   // 相对「文档」解析（不是相对本模块）：两页都在站点根目录，用 ./assets 可同时
   // 兼容根路径部署（GitHub Pages 用户站）与子路径部署（项目站 / 本地预览沙箱）。
-  url: './assets/models/armor2.glb',
+  url: './assets/models/detail/mk7.glb',
   targetHeight: 1.95,
   fov: 32,
   exposure: 1.08,
