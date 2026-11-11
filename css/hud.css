@@ -366,10 +366,36 @@ body {
 @media (max-width: 840px) {
   .hud {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "top" "stage" "dock";
+    grid-template-rows: 42px auto minmax(0, 1fr) auto;
+    grid-template-areas: "top" "views" "stage" "dock";
     padding: 8px 8px 10px;
   }
+  /* 侧栏整体收起，但保留「其他页面入口」——把它从左栏里拆出来做成横向导航条 */
   .rail { display: none; }
+  .rail.left { display: contents; }
+  .rail.left > section:not(.views) { display: none; }
+
+  .panel.views {
+    grid-area: views;
+    display: flex; align-items: stretch; gap: 6px;
+    padding: 5px 6px;
+  }
+  .panel.views .p-head { display: none; }
+  .panel.views a {
+    flex: 1 1 0; min-width: 0;
+    justify-content: center; gap: 5px;
+    padding: 6px 4px;
+    font-size: 9px; letter-spacing: .06em;
+    border: 1px solid rgba(125, 232, 255, .2);
+    border-radius: 2px;
+    background: rgba(125, 232, 255, .05);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .panel.views a:last-child { border-bottom: 1px solid rgba(125, 232, 255, .2); }
+  .panel.views a:hover,
+  .panel.views a:active { padding-left: 4px; background: rgba(125, 232, 255, .14); }
+
+  /* 触屏上没有 hover，靠按下反馈就够；同时放大点击热区 */
   .dock { gap: 5px; padding: 6px; }
   .topbar .unit em { display: none; }
 }
@@ -381,4 +407,10 @@ body {
   .slider { display: none; }
   .dock { flex-wrap: wrap; justify-content: center; }
   .dock .sep { display: none; }
+  .panel.views a { font-size: 8.5px; letter-spacing: .03em; }
+}
+@media (max-width: 400px) {
+  /* 极窄屏再去掉序号，保证三项标题都不被截断 */
+  .panel.views a i { display: none; }
+  .panel.views { gap: 4px; padding: 4px 5px; }
 }
