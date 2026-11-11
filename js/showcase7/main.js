@@ -38,6 +38,8 @@ const CONFIG = {
   coreZ: 0.62,          // 锚点深度兜底值（× 模型最大 z）：正常情况下由射线吸附到真实表面
   coreR: 0.036,         // 反应堆光斑半径（× 模型身高）；宽体模型可调大
   coreWall: 1.1,        // 离面容差（× 光斑半径）：舱口越凸凹越大，太小会把外晕切在坑沿上
+  coreFx: 1,            // 反应堆辉光总强度 0~1（?corefx=0 整套关掉：光核 + 外晕 + 波纹）
+  coreRip: 1,           // 波纹强度 0~1（?corerip=0 只留光核、去掉外扩波纹）
 };
 
 // 允许覆盖模型路径：优先级 ?model=… 查询参数 > 引入脚本的 data-model 属性 > CONFIG 默认值。
@@ -78,6 +80,14 @@ const CONFIG = {
   if (Number.isFinite(coreROverride) && coreROverride > 0) CONFIG.coreR = coreROverride;
   const coreWOverride = Number(u.get('corew') || (scriptEl() && scriptEl().dataset.corew));
   if (Number.isFinite(coreWOverride) && coreWOverride > 0) CONFIG.coreWall = coreWOverride;
+
+  // 辉光开关：允许为 0（默认 1）。HUD 那种小尺寸展位不想要胸口的辉光，用 ?corefx=0 关掉；
+  // 只想留中心光点、去掉外扩波纹时用 ?corerip=0。
+  for (const [key, param] of [['coreFx', 'corefx'], ['coreRip', 'corerip']]) {
+    const raw = u.get(param) || (scriptEl() && scriptEl().dataset[param]);
+    const num = Number(raw);
+    if (raw !== null && raw !== '' && Number.isFinite(num)) CONFIG[key] = Math.min(1, Math.max(0, num));
+  }
 }
 
 const state = {
@@ -486,6 +496,8 @@ const edgeMat = new THREE.ShaderMaterial({
     uCoreOn: { value: 0 },
     uCoreWall: { value: CONFIG.coreWall },
     uCoreR: { value: CONFIG.coreR * CONFIG.targetHeight },
+    uCoreGain: { value: CONFIG.coreFx },
+    uCoreRip: { value: CONFIG.coreRip },
     uInvProj: { value: camera.projectionMatrixInverse },
     uCamWorld: { value: camera.matrixWorld },
     // embed 默认透明输出（只取装甲本体）；solid=1 时不透明输出，
@@ -506,7 +518,7 @@ const edgeMat = new THREE.ShaderMaterial({
     uniform float uStrength, uThickness, uNormalW, uDepthW, uNear, uFar, uLight, uLumW, uDetail, uSurface, uTime, uFlow, uTransparent;
     uniform vec3 uLineColor;
     uniform vec3 uCoreWorld, uCoreNrm;
-    uniform float uCoreOn, uCoreR, uCoreWall;
+    uniform float uCoreOn, uCoreR, uCoreWall, uCoreGain, uCoreRip;
     uniform mat4 uInvProj, uCamWorld;
 
     float linDepth(vec2 uv) {
@@ -643,15 +655,19 @@ const edgeMat = new THREE.ShaderMaterial({
         vec3 coreCol = vec3(0.58, 0.90, 1.00);
         float k = uCoreOn * occl;
         float kw = uCoreOn * occlWide;
-        col += coreCol * (core * 2.40 + halo * 0.52) * beat * k;
-        col += vec3(1.0) * core * 0.95 * beat * k;                    // 核心偏白，避免整块发青
+        // uCoreGain：整套辉光的总开关（HUD 小展位可用 ?corefx=0 关掉）；
+        // uCoreRip：只控波纹强度（?corerip=0 保留中心光点）
+        float kg = k * uCoreGain;
+        float kwg = kw * uCoreGain * uCoreRip;
+        col += coreCol * (core * 2.40 + halo * 0.52) * beat * kg;
+        col += vec3(1.0) * core * 0.95 * beat * kg;                   // 核心偏白，避免整块发青
         // 波纹：平板只留一层淡青雾（约 1/10 强度），刻线才是主要载体
         float ripLine = rip * exp(-r * 0.12);                         // 线条点亮单独放缓衰减，能跑到胸甲边缘
-        col += coreCol * rip * (0.09 + 1.90 * trace) * 1.05 * kw;
+        col += coreCol * rip * (0.09 + 1.90 * trace) * 1.05 * kwg;
         // 关键：线条本身已接近纯白，加白只会溢出成同一片白 —— 必须「替换」而不是「叠加」。
         // 波前扫过的刻线被换成青白色，才真的看得出能量顺着纹路跑。
         vec3 ripTint = mix(coreCol * 1.05, vec3(1.0), 0.28);
-        col = mix(col, ripTint, clamp(ripLine * trace * 2.2, 0.0, 0.9) * kw);
+        col = mix(col, ripTint, clamp(ripLine * trace * 2.2, 0.0, 0.9) * kwg);
       }
 
       // 输出 alpha：贾维斯模式透传 RT alpha（装甲 1 / 背景 0，iframe 从画布下面透出），
