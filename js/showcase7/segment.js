@@ -415,6 +415,9 @@ export function splitArmorMeshes(meshes, targetHeight) {
   }
 
   // ---- 阶段 6：每零件构建子几何（顶点减去该零件质心） ----
+  // 多材质模型（如反浩克：158 网格 / 14 材质）里一个零件往往横跨多个源网格，
+  // 每个源有各自的贴图图集。因此几何体按源打 group、材质取源自身的数组，
+  // 不能再「取首个三角形的材质」—— 否则 UV 对不上图集，表面会糊成白噪。
   const out = new Map();
   let n = 0;
   for (const s of seeds) {
@@ -423,21 +426,26 @@ export function splitArmorMeshes(meshes, targetHeight) {
       const tri = tris[t];
       return { src: tri.src, i0: tri.i0, i1: tri.i1, i2: tri.i2 };
     });
+    const built = buildRegionGeometry(list, s.center);
     out.set(`${s.region}#${n++}`, {
       region: s.region,
-      geometry: buildRegionGeometry(list, s.center),
+      geometry: built.geometry,
+      material: built.material,
       center: s.center,
       normal: s.normal,
       area: s.area,
       tris: list.length,
-      material: tris[s.list[0]].src.mesh.material,
     });
   }
   splitStats.pieces = out.size;
   return out;
 }
 
-/** 把一个区域的三角形重索引成独立 BufferGeometry（通用复制全部顶点属性，position 减 center） */
+/**
+ * 把一个区域的三角形重索引成独立 BufferGeometry（通用复制全部顶点属性，position 减 center）
+ * 返回 { geometry, material }：跨多个源网格时按源打 geometry group，材质返回数组。
+ * @returns {{ geometry: THREE.BufferGeometry, material: THREE.Material|THREE.Material[] }}
+ */
 function buildRegionGeometry(tris, center) {
   // 按源网格分组（多材质/多网格时各源独立重编号，再拼到一个几何里）
   const srcOrder = [];
@@ -508,17 +516,45 @@ function buildRegionGeometry(tris, center) {
     });
     g.setAttribute(name, new THREE.BufferAttribute(merged, itemSize));
   }
-  const indexArr = new Uint32Array(tris.length * 3);
+  // 索引按源排序后写入：这样每个源在索引缓冲里是连续区间，才能用 group 指定材质。
+  // （三角形顺序对渲染无影响，只影响绘制批次。）
+  const sorted = tris.slice().sort((a, b) => srcId.get(a.src) - srcId.get(b.src));
+  const indexArr = new Uint32Array(sorted.length * 3);
+  const ranges = [];        // { start, count, src }：每个源在索引缓冲里的连续区间
   let w = 0;
-  for (const t of tris) {
-    const d = attrData[srcId.get(t.src)];
-    const s = perSrc[srcId.get(t.src)];
+  let curSrc = -1;
+  let start = 0;
+  for (const t of sorted) {
+    const sid = srcId.get(t.src);
+    if (sid !== curSrc) {
+      if (curSrc >= 0) ranges.push({ start, count: w - start, src: curSrc });
+      curSrc = sid;
+      start = w;
+    }
+    const d = attrData[sid];
+    const s = perSrc[sid];
     indexArr[w++] = d.vertBase + s.used.get(t.i0);
     indexArr[w++] = d.vertBase + s.used.get(t.i1);
     indexArr[w++] = d.vertBase + s.used.get(t.i2);
   }
+  if (curSrc >= 0) ranges.push({ start, count: w - start, src: curSrc });
+
   g.setIndex(new THREE.BufferAttribute(indexArr, 1));
+
+  // 材质：按源去重（同一材质实例复用），单材质模型走原路径（无 group、返回单个材质）
+  const mats = srcOrder.map((src) => src.mesh.material);
+  const unique = [];
+  const matIndex = mats.map((m) => {
+    const i = unique.indexOf(m);
+    if (i >= 0) return i;
+    unique.push(m);
+    return unique.length - 1;
+  });
+  if (unique.length > 1) {
+    for (const r of ranges) g.addGroup(r.start, r.count, matIndex[r.src]);
+  }
+
   g.computeBoundingBox();
   g.computeBoundingSphere();
-  return g;
+  return { geometry: g, material: unique.length > 1 ? unique : unique[0] };
 }

@@ -25,12 +25,17 @@ const CONFIG = {
   fov: 32,
   exposure: 1.08,
   albedoLod: 5.0,       // 反照率降采样级别（越大越干净）
+  nmLine: 0.85,         // 法线贴图梯度 → 刻线强度（贴图本身有干净缝线的模型可调低）
   normalScale: 0.45,    // 法线贴图强度（原图是噪声，压低只留起伏）
   safeTop: 30,
   safeBottom: 104,
   fitScale: 1,          // 取景距离倍率：宽体/厚深度模型（如反浩克）需 >1 才不被裁切；1 = 原行为
   rot0: 0,              // 初始朝向（度）：并排多展位时错开起始相位，避免同步旋转
   flat: false,          // 结构线模式：丢弃贴图，装甲换成同一套素模材质（只留几何轮廓线）
+  metal: 0.96,          // 统一金属度：MK VII 的金属贴图是噪声，直接用常量
+  envInt: 0.85,         // 环境反射强度：暗色涂装（如反浩克的黑金）需要更高才不是一片死黑
+  strength: 0.85,       // 初始线条强度：面数越高边缘越密（54 万面），需要调低才不糊成白噪
+  width: 1.05,          // 初始线条宽度（px）
   splitZoom: 1.40,      // 拆解态的相机后拉倍率（零件向四周散开，需要让出取景空间）
   splitTargetY: 0.50,   // 拆解态视点高度（× 身高）：整体外扩后重心回到身高中段
   coreX: 0,             // 反应堆锚点横向偏移（× 身高）：反浩克舱口在模型中线偏左（可 ?corex= 覆盖）
@@ -70,6 +75,26 @@ const CONFIG = {
   // 结构线模式（?flat=1）：不吃贴图，多材质模型切成单材质后不会出现错贴图黑洞
   CONFIG.flat = u.get('flat') === '1';
 
+  // 材质常量（?metal=0.9&env=2.2）：暗色涂装模型需要更强的环境反射才不糊成剪影
+  for (const [key, param] of [['metal', 'metal'], ['envInt', 'env']]) {
+    const raw = u.get(param) || (scriptEl() && scriptEl().dataset[param]);
+    const num = Number(raw);
+    if (raw !== null && raw !== '' && Number.isFinite(num) && num >= 0) CONFIG[key] = num;
+  }
+  // 反照率 mip 级别 + 法线刻线强度（?lod=1&nmline=0.5）：
+  // MK VII 的贴图是 AI 噪声要靠大 mip 抹平；常规图集模型用大 mip 反而会糊成灰白。
+  for (const [key, param] of [['albedoLod', 'lod'], ['nmLine', 'nmline']]) {
+    const raw = u.get(param) || (scriptEl() && scriptEl().dataset[param]);
+    const num = Number(raw);
+    if (raw !== null && raw !== '' && Number.isFinite(num) && num >= 0) CONFIG[key] = num;
+  }
+  // 初始线条强度 / 宽度（?str=0.55&wid=0.9）：高面数模型的边缘线密度大，需要更细更淡
+  for (const [key, param] of [['strength', 'str'], ['width', 'wid']]) {
+    const raw = u.get(param) || (scriptEl() && scriptEl().dataset[param]);
+    const num = Number(raw);
+    if (raw !== null && raw !== '' && Number.isFinite(num) && num > 0) CONFIG[key] = num;
+  }
+
   // 反应堆锚点微调（?corex=0.02&corey=0.72）：不同体型（反浩克 / MK VII）胸位不同，
   // 宿主页可按需覆盖，不写则用 CONFIG 默认值。
   const coreXOverride = Number(u.get('corex') || (scriptEl() && scriptEl().dataset.corex));
@@ -104,8 +129,8 @@ const state = {
   tris: 0,
   showLine: true,
   invert: false,        // false=暗线 true=亮线
-  strength: 0.85,
-  width: 1.05,
+  strength: CONFIG.strength,
+  width: CONFIG.width,
   surface: 1.0,         // 装甲表面存在感：1=全彩，0=纯线稿（去饱和 + 压暗）
   lineOnly: false,
   prevSurface: 1.0,     // 仅线条恢复时用
@@ -740,11 +765,11 @@ function dress(root) {
     const m = o.material;
     if (!m) return;
 
-    m.metalness = 0.96;
+    m.metalness = CONFIG.metal;
     m.roughness = 0.3;
     m.metalnessMap = null;      // 噪声贴图，交给常量
     m.roughnessMap = null;
-    m.envMapIntensity = 0.85;
+    m.envMapIntensity = CONFIG.envInt;
     m.emissiveIntensity = 1.15;
     if (m.normalMap) {
       m.normalScale = new THREE.Vector2(CONFIG.normalScale, CONFIG.normalScale);
@@ -756,7 +781,7 @@ function dress(root) {
     m.onBeforeCompile = (shader) => {
       shader.uniforms.uAlbedoLod = { value: CONFIG.albedoLod };
       shader.uniforms.uNMTexel = { value: 1 / nmSize };
-      shader.uniforms.uNMLine = { value: state.showLine ? 0.85 : 0.0 };
+      shader.uniforms.uNMLine = { value: state.showLine ? CONFIG.nmLine : 0.0 };
       shader.fragmentShader =
         'uniform float uAlbedoLod; uniform float uNMTexel; uniform float uNMLine;\n' + shader.fragmentShader;
 
@@ -1004,6 +1029,11 @@ async function boot() {
         state.coreNrm = nSum.lengthSq() > 1e-6
           ? nSum.normalize()
           : new THREE.Vector3(0, 0, 1);
+        // 朝前（+Z）：射线是从正前方打的，舱口法线必然朝观众。
+        // 反浩克这类模型大量节点用负缩放做镜像，hit.face.normal 经 normalMatrix
+        // 变换后会朝内（-Z），不翻转的话整块胸甲都会被判成「挡住光晕」，
+        // 光斑只剩中心一个白点。
+        if (state.coreNrm.z < 0) state.coreNrm.negate();
         edgeMat.uniforms.uCoreNrm.value.copy(state.coreNrm);
       }
     }
@@ -1413,6 +1443,10 @@ function toggleSplit() {
 }
 
 function initUI() {
+  // 把 state 的初值同步到控件（高面数模型可通过 data-str / data-wid 调低线条强度）
+  $('rg-strength').value = String(state.strength);
+  $('st-line').textContent = Math.round(state.strength * 100) + '%';
+  $('rg-width').value = String(state.width);
   $('btn-rotate').addEventListener('click', () => {
     state.auto = !state.auto;
     $('btn-rotate').classList.toggle('on', state.auto);

@@ -2,12 +2,13 @@
 
 实时渲染的钢铁侠战甲全息投影展示页，部署于 GitHub Pages：**https://domlaa.github.io/**
 
-站点含两个独立页面：
+站点含三个独立页面：
 
 | 页面 | 地址 | 模型 | 特点 |
 | --- | --- | --- | --- |
 | 全息拆解展示 | `/` | `assets/models/armor.glb`（1.2 万面） | 全息材质、10 模块拆解、HUD 指示线 |
 | MK7 线稿渲染 | `/mk7.html` | `assets/models/detail/mk7.glb`（14 万面） | 屏幕空间边缘检测、表面线条叠加、暗线/亮线双模式、截图导出 |
+| 反浩克线稿渲染 | `/hulkbuster.html` | `assets/models/optimized/hulk-buster_texture2048_webp.glb`（54 万面） | 同一套渲染管线，黑金涂装参数单独调优（低金属度 / 强环境反射 / 细线） |
 
 ![tech](https://img.shields.io/badge/Three.js-r187-7de8ff) ![tech](https://img.shields.io/badge/WebGL-2.0-7de8ff) ![tech](https://img.shields.io/badge/build-none-brightgreen)
 
@@ -40,24 +41,14 @@
 ```
 index.html                 入口（importmap + HUD 结构）
 mk7.html                   MK VII 线稿渲染页
-css/mk7.css                MK VII 页样式
+hulkbuster.html            MARK XLIV 反浩克线稿渲染页（同管线，模型/取景/材质走 data-* 参数）
+css/mk7.css                线稿页共用样式
 css/hud.css                HUD 全部样式与响应式
-assets/models/armor.glb    战甲模型（全息页，部署用）
-
-### 模型目录分类规则（assets/models/）
-
-| 目录 | 定位 | 纹理 | 体积 | 用途 |
-| --- | --- | --- | --- | --- |
-| `detail/` | 纹理效果最佳、细节完整保留的模型 | 原生不压缩 | 最大 | 追求画质与细节呈现的页面 |
-| `lite/`  | 仅保留基础结构，舍弃纹理效果 | 无纹理 | 最小 | 用于绘制线条（线稿渲染） |
-| `optimized/` | 在二者之间取舍，仅压缩纹理贴图部分 | 压缩纹理 | 居中 | 兼顾画质与加载速度 |
-
-当前分布：`detail/mk7.glb`（原 armor2.glb，38 MB · 4K PBR 贴图）｜`lite/mk7_lite.glb`、`lite/hulk-buster2_lite.glb`（draco 压缩 · 无纹理）｜`optimized/`（2048 webp 纹理版）。
-assets/models/detail/mk7.glb  MK VII 模型（线稿页，38 MB，含 4K PBR 贴图）
+assets/models/             战甲模型（见下）
 lib/three/                 Three.js r187 + 本地化 addons
 js/
 ├─ main.js                 编排：加载 → 显现 → 渲染循环
-├─ showcase7/main.js       MK7 页：三通道渲染 + 边缘检测线稿
+├─ showcase7/main.js       线稿页：三通道渲染 + 边缘检测线稿
 ├─ config/armor.config.js  模块定义、切分阈值、拆解偏移、场景参数
 ├─ core/SceneManager.js    渲染器 / 相机 / OrbitControls / 辉光 / 平台网格
 ├─ model/
@@ -74,6 +65,16 @@ js/
 ├─ interaction/ArmorRaycaster.js  悬停与点击拾取（区分拖拽）
 └─ ui/HUD.js               面板渲染 + 指示线投影 + 控制绑定
 ```
+
+### 模型目录分类规则（assets/models/）
+
+| 目录 | 定位 | 纹理 | 体积 | 用途 |
+| --- | --- | --- | --- | --- |
+| `detail/` | 纹理效果最佳、细节完整保留的模型 | 原生不压缩 | 最大 | 追求画质与细节呈现的页面 |
+| `lite/`  | 仅保留基础结构，舍弃纹理效果 | 无纹理 | 最小 | 用于绘制线条（线稿渲染） |
+| `optimized/` | 在二者之间取舍，仅压缩纹理贴图部分 | 压缩纹理 | 居中 | 兼顾画质与加载速度 |
+
+当前分布：`detail/mk7.glb`（原 armor2.glb，38 MB · 4K PBR 贴图）｜`lite/mk7_lite.glb`、`lite/hulk-buster2_lite.glb`（draco 压缩 · 无纹理）｜`optimized/hulk-buster_texture2048_webp.glb`（2048 webp 纹理版 · 21 MB，反浩克页用）。
 
 ## 四、本地运行
 
@@ -150,3 +151,40 @@ git add -A && git commit -m "feat: 3D 全息战甲展示系统" && git push
 - **接触阴影**：程序化径向渐变平面（比真实阴影干净，不受阴影视锥边界影响），法线通道中会临时隐藏
 - **性能**：1440×900 @2x 下 90 FPS；连续低于 30 FPS 时自动把 DPR 降到 1
 - **交互**：拖拽 / 滚轮 / 双击复位、自动旋转、线稿强度、线宽、暗线↔亮线、流光开关（G）、背景开关（B）、截图（合成深色底、不含 UI）、全屏
+
+---
+
+## 十、反浩克线稿渲染页（`/hulkbuster.html`）
+
+与 MK VII 页**共用同一套渲染管线**（`js/showcase7/`），页面上只有 `data-*` 参数不同，改模型/取景/材质不用动 JS：
+
+```html
+<script type="module" src="./js/showcase7/main.js"
+        data-model="assets/models/optimized/hulk-buster_texture2048_webp.glb"
+        data-fit="1.4" data-corex="-0.0155" data-corey="0.742" data-corer="0.055"
+        data-metal="0.25" data-env="1.6" data-lod="2" data-nmline="0.2"
+        data-str="0.55" data-wid="0.9"></script>
+```
+
+### 这份模型与 MK VII 的差异，以及对应的参数
+
+| 差异 | 现象 | 处理 |
+| --- | --- | --- |
+| **158 个网格 / 14 种材质**（MK VII 是单块蒙皮网格） | 连通域切分后每个零件只剩「首个三角形的材质」，UV 与图集错位 → 表面糊成白噪 | `segment.js` 改为**按源网格打 geometry group + 材质数组**（`buildRegionGeometry` 返回 `{ geometry, material }`），多材质零件的图集不再串台 |
+| **黑金涂装**，基色接近纯黑 | `metalness≈1` 时高光颜色 = 基色 = 黑，整块胸甲死黑成剪影 | `?metal=0.25`（低金属度 → 高光回到白）+ `?env=1.6`（增强环境反射） |
+| 贴图是正常的 2048 图集 | `albedoLod=5` 是按 MK VII 的 AI 噪声贴图定的，会把色块糊成灰白 | `?lod=2`，同时把法线刻线降到 `?nmline=0.2` |
+| **54 万面**（MK VII 14 万） | 边缘检测密度过高 → 满屏白噪线 | `data-str="0.55"` / `data-wid="0.9"` 降低线条强度与宽度 |
+| 体型宽厚、舱口偏左 | 默认取景/反应堆位置不适用 | `data-fit="1.4"`、`data-corex="-0.0155"`、`data-corey="0.742"` |
+| 大量节点用**负缩放**做镜像 | `hit.face.normal` 经 normalMatrix 后朝内 → 整块胸甲被判成遮挡，反应堆只剩一个白点 | `main.js` 里舱口法线统一朝前（`coreNrm.z < 0` 时取反） |
+
+### 新增的可覆盖参数（默认值不变，MK VII 页不受影响）
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| `?metal=` | 0.96 | 统一金属度 |
+| `?env=` | 0.85 | 环境反射强度 |
+| `?lod=` | 5.0 | 反照率 mip 级别 |
+| `?nmline=` | 0.85 | 法线贴图刻线强度 |
+| `?str=` / `?wid=` | 0.85 / 1.05 | 初始线条强度 / 宽度（对应工具栏滑杆初值） |
+
+两页右下角互链（`MARK VII →` / `HULK BUSTER →`），方便同屏对照。
