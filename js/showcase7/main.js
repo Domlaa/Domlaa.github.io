@@ -621,15 +621,37 @@ const edgeMat = new THREE.ShaderMaterial({
         float r = length(pPlane - uCoreWorld) / uCoreR;
         float along = dot(pSurf - uCoreWorld, uCoreNrm);   // >0 = 表面比舱口更靠外（凸出）
         float occl = smoothstep(uCoreR * uCoreWall, uCoreR * uCoreWall * 0.35, along);
+        // 波纹要铺满整块胸甲，不能沿用光核那套紧贴舱口的遮挡（1.1R 就把波切死在晕边）。
+        // 单独放宽到 3.6R：胸甲起伏、肩甲都能过，手臂这种明显挡在前面的东西仍然被挡。
+        float occlWide = smoothstep(uCoreR * 3.6, uCoreR * 2.2, along);
         float beat = 0.86 + 0.14 * sin(uTime * 2.35);
         float core = exp(-r * r * 9.0);                               // 白热光核
         float halo = exp(-r * r * 2.2);                               // 冷青外晕
-        float ringR = 1.32 + 0.30 * (0.5 + 0.5 * sin(uTime * 2.35 + 1.1));
-        float ring = exp(-pow((r - ringR) * 5.0, 2.0));               // 呼吸光环
+        // 自内向外扩散的能量波纹（替代旧呼吸环）：
+        // 主冲击波 = 前缘极锐、内侧缓收的水波剖面，越过前缘的甲片先亮再熄，有推进感；
+        // 再叠几道随主波外扩的同心细纹，扩散方向一眼可读。
+        // 两者都乘纹路遮罩（上文法线/深度/亮度三路边缘，即甲片刻线）：
+        // 刻线被推成白热、平板只留淡青雾 —— 波是顺着机甲纹路往外烧，而非孤立光圈。
+        float trace = clamp(edge * 1.7, 0.0, 1.0);                    // 纹路遮罩：缝线处 1
+        float maxR = 4.2;                                             // 扩到 4.2× 光斑半径（覆盖整个胸甲）
+        float ph1 = fract(uTime * 0.22);                              // 4.5s 涌出一道
+        float d1 = r - ph1 * maxR;
+        float shock = mix(exp(-max(-d1, 0.0) * 6.0), exp(-max(d1, 0.0) * 24.0), step(0.0, d1))
+                    * pow(1.0 - ph1, 1.25);
+        float rings = pow(0.5 + 0.5 * sin(r * 5.2 - uTime * 4.0), 14.0) * exp(-r * 0.5);
+        float rip = max(shock, rings * 0.9) * 2.3;
         vec3 coreCol = vec3(0.58, 0.90, 1.00);
         float k = uCoreOn * occl;
-        col += coreCol * (core * 2.40 + halo * 0.52 + ring * 0.38) * beat * k;
+        float kw = uCoreOn * occlWide;
+        col += coreCol * (core * 2.40 + halo * 0.52) * beat * k;
         col += vec3(1.0) * core * 0.95 * beat * k;                    // 核心偏白，避免整块发青
+        // 波纹：平板只留一层淡青雾（约 1/10 强度），刻线才是主要载体
+        float ripLine = rip * exp(-r * 0.12);                         // 线条点亮单独放缓衰减，能跑到胸甲边缘
+        col += coreCol * rip * (0.09 + 1.90 * trace) * 1.05 * kw;
+        // 关键：线条本身已接近纯白，加白只会溢出成同一片白 —— 必须「替换」而不是「叠加」。
+        // 波前扫过的刻线被换成青白色，才真的看得出能量顺着纹路跑。
+        vec3 ripTint = mix(coreCol * 1.05, vec3(1.0), 0.28);
+        col = mix(col, ripTint, clamp(ripLine * trace * 2.2, 0.0, 0.9) * kw);
       }
 
       // 输出 alpha：贾维斯模式透传 RT alpha（装甲 1 / 背景 0，iframe 从画布下面透出），
