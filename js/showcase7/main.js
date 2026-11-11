@@ -40,6 +40,7 @@ const CONFIG = {
   coreWall: 1.1,        // 离面容差（× 光斑半径）：舱口越凸凹越大，太小会把外晕切在坑沿上
   coreFx: 1,            // 反应堆辉光总强度 0~1（?corefx=0 整套关掉：光核 + 外晕 + 波纹）
   coreRip: 1,           // 波纹强度 0~1（?corerip=0 只留光核、去掉外扩波纹）
+  coreRad: 0,           // 静态辐射强度 0~1（默认关）：沿刻线 + 平板由内向外渐隐，不随时间推进
 };
 
 // 允许覆盖模型路径：优先级 ?model=… 查询参数 > 引入脚本的 data-model 属性 > CONFIG 默认值。
@@ -81,9 +82,10 @@ const CONFIG = {
   const coreWOverride = Number(u.get('corew') || (scriptEl() && scriptEl().dataset.corew));
   if (Number.isFinite(coreWOverride) && coreWOverride > 0) CONFIG.coreWall = coreWOverride;
 
-  // 辉光开关：允许为 0（默认 1）。HUD 那种小尺寸展位不想要胸口的辉光，用 ?corefx=0 关掉；
-  // 只想留中心光点、去掉外扩波纹时用 ?corerip=0。
-  for (const [key, param] of [['coreFx', 'corefx'], ['coreRip', 'corerip']]) {
+  // 辉光开关：允许为 0（默认 1）。不想要胸口的辉光用 ?corefx=0；
+  // 只留光核 + 沿刻线的静态辐射、去掉外扩波纹时用 ?corerip=0（HUD 页就是这么配的）；
+  // ?corerad=0 可再单独关掉静态辐射，只留中心光点。
+  for (const [key, param] of [['coreFx', 'corefx'], ['coreRip', 'corerip'], ['coreRad', 'corerad']]) {
     const raw = u.get(param) || (scriptEl() && scriptEl().dataset[param]);
     const num = Number(raw);
     if (raw !== null && raw !== '' && Number.isFinite(num)) CONFIG[key] = Math.min(1, Math.max(0, num));
@@ -477,6 +479,7 @@ const edgeMat = new THREE.ShaderMaterial({
     uCoreR: { value: CONFIG.coreR * CONFIG.targetHeight },
     uCoreGain: { value: CONFIG.coreFx },
     uCoreRip: { value: CONFIG.coreRip },
+    uCoreRad: { value: CONFIG.coreRad },
     uInvProj: { value: camera.projectionMatrixInverse },
     uCamWorld: { value: camera.matrixWorld },
     // embed 默认透明输出（只取装甲本体）；solid=1 时不透明输出，
@@ -497,7 +500,7 @@ const edgeMat = new THREE.ShaderMaterial({
     uniform float uStrength, uThickness, uNormalW, uDepthW, uNear, uFar, uLight, uLumW, uDetail, uSurface, uTime, uFlow, uTransparent;
     uniform vec3 uLineColor;
     uniform vec3 uCoreWorld, uCoreNrm;
-    uniform float uCoreOn, uCoreR, uCoreWall, uCoreGain, uCoreRip;
+    uniform float uCoreOn, uCoreR, uCoreWall, uCoreGain, uCoreRip, uCoreRad;
     uniform mat4 uInvProj, uCamWorld;
 
     float linDepth(vec2 uv) {
@@ -634,12 +637,31 @@ const edgeMat = new THREE.ShaderMaterial({
         vec3 coreCol = vec3(0.58, 0.90, 1.00);
         float k = uCoreOn * occl;
         float kw = uCoreOn * occlWide;
-        // uCoreGain：整套辉光的总开关（HUD 小展位可用 ?corefx=0 关掉）；
-        // uCoreRip：只控波纹强度（?corerip=0 保留中心光点）
+        // uCoreGain：整套辉光的总开关（可用 ?corefx=0 关掉）；
+        // uCoreRip：只控波纹强度（?corerip=0 保留光核与静态辐射）
+        // uCoreRad：静态辐射强度（沿刻线由内向外渐隐，不推进）
         float kg = k * uCoreGain;
         float kwg = kw * uCoreGain * uCoreRip;
         col += coreCol * (core * 2.40 + halo * 0.52) * beat * kg;
         col += vec3(1.0) * core * 0.95 * beat * kg;                   // 核心偏白，避免整块发青
+        // ------------------------------------------------------------
+        // 静态辐射：胸口由内向外渐亮再渐隐，不随时间推进、不成环。
+        // 和波纹是两件事 —— 波纹是「一道波前扫过去」，这里是「胸甲一直被内芯烤着」，
+        // 所以 ?corerip=0 关掉波纹后仍可单独开启（?corerad=1），保留辐射状亮度梯度。
+        // 注意：亮线模式下线条本身已接近纯白，只做色相替换看不出来，
+        // 必须同时给刻线加色（过曝成白热）和平板一层极轻底光，才有「内亮外暗」的观感。
+        // ------------------------------------------------------------
+        // 乘 beat：整体亮度随光核轻微呼吸（只变明暗，不动半径 —— 不会变成环）
+        float radA = kw * uCoreGain * uCoreRad * beat;
+        if (radA > 0.001) {
+          float radFade = exp(-max(r - 0.55, 0.0) * 0.58);            // 光斑边缘起算，向外衰减（衰减越快、内外反差越明确）
+          vec3 radTint = mix(vec3(0.96, 1.0, 1.0), coreCol * 1.05, smoothstep(0.5, 3.0, r));
+          float lineW = clamp(trace * radFade * 1.25, 0.0, 0.95) * radA;
+          col = mix(col, radTint, lineW * 0.75);                      // 刻线偏白热
+          col += radTint * lineW * 0.45;                              // 再叠加 → 中心刻线真的溢出成光
+          // 平板底光只给 0.16，刚好把线条连成一片光区，不至于糊成一块
+          col += coreCol * radFade * 0.30 * radA * (0.30 + 0.70 * trace);
+        }
         // 波纹：平板只留一层淡青雾（约 1/10 强度），刻线才是主要载体
         float ripLine = rip * exp(-r * 0.12);                         // 线条点亮单独放缓衰减，能跑到胸甲边缘
         col += coreCol * rip * (0.09 + 1.90 * trace) * 1.05 * kwg;
