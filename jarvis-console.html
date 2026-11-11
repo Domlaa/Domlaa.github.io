@@ -4,8 +4,8 @@
   HALOFLUX - Copyright (c) 2026 Ryder191 (RYDER CODE / Ms MAIKEBAIs CAT)
   https://github.com/Ryder191/haloflux · PolyForm Noncommercial License 1.0.0（仅限非商业用途）
   本页保留 HALOFLUX 原有控制台设计（头部 KPI / 舞台光环 / 底部面板），
-  舞台左右两个展位各嵌一台装甲（mk7.html?embed=1 透明 iframe，均为 model/tiny 压缩模型）：
-    左 · MARK XLIV HULK BUSTER（hulk+buster2_optimized.glb，宽体 → fit 放大取景距离）
+  舞台左右两个展位各嵌一台装甲（mk7.html?embed=1 透明 iframe，均为 assets/models 压缩模型）：
+    左 · MARK XLIV HULK BUSTER（hulk-buster2_optimized.glb，宽体 → fit 放大取景距离）
     右 · MARK VII（irobny2_optimized.glb）
   两者都走「仅线条 + 素模」投影（line=1 & flat=1），保留自动旋转与线条流光。
 -->
@@ -170,19 +170,19 @@ header{display:grid;grid-template-columns:minmax(240px,1.7fr) repeat(5,minmax(0,
   <div class="stage" id="stageWrap">
     <canvas id="stage"></canvas>
     <div class="rigs" id="rigs">
-      <!-- 左：MARK XLIV 反浩克 · 右：MARK VII。均用 model/tiny 压缩模型 + 仅线条投影。
+      <!-- 左：MARK XLIV 反浩克 · 右：MARK VII。均用 assets/models 压缩模型 + 仅线条投影。
            fit 按模型宽深比给：反浩克是宽体，取景距离要 ×1.22 才不被裁切。
            反应堆：corefx=1 保留光核高亮，corerad=1 亮线由内向外渐隐，
            ripmax=2.2 把扩散波纹收在光核附近一圈，不铺满整块胸甲。 -->
       <figure class="rig" data-side="l">
         <iframe class="rig-frame loading" scrolling="no" tabindex="-1"
-                src="mk7.html?embed=1&amp;line=1&amp;flat=1&amp;auto=1&amp;rot=-24&amp;fit=1.22&amp;corex=-0.0155&amp;corey=0.742&amp;corefx=1&amp;corerad=0.5&amp;ripmax=2.2&amp;corerip=0.85&amp;model=model/tiny/hulk%2Bbuster2_optimized.glb"
+                src="mk7.html?embed=1&amp;line=1&amp;flat=1&amp;auto=1&amp;rot=-24&amp;fit=1.22&amp;corex=-0.0155&amp;corey=0.742&amp;corefx=1&amp;corerad=0.5&amp;ripmax=2.2&amp;corerip=0.85&amp;model=assets/models/hulk-buster2_optimized.glb"
                 title="MARK XLIV HULK BUSTER edge-line armor"></iframe>
         <figcaption class="rig-tag"><i></i><b>MARK XLIV</b><span>HULK BUSTER</span></figcaption>
       </figure>
       <figure class="rig" data-side="r">
         <iframe class="rig-frame loading" scrolling="no" tabindex="-1"
-                src="mk7.html?embed=1&amp;line=1&amp;flat=1&amp;auto=1&amp;rot=26&amp;fit=1.06&amp;corefx=1&amp;corerad=0.5&amp;ripmax=2.2&amp;corerip=0.85&amp;model=model/tiny/irobny2_optimized.glb"
+                src="mk7.html?embed=1&amp;line=1&amp;flat=1&amp;auto=1&amp;rot=26&amp;fit=1.06&amp;corefx=1&amp;corerad=0.5&amp;ripmax=2.2&amp;corerip=0.85&amp;model=assets/models/irobny2_optimized.glb"
                 title="MARK VII edge-line armor"></iframe>
         <figcaption class="rig-tag"><i></i><b>MARK VII</b><span>EDGE LINE</span></figcaption>
       </figure>
