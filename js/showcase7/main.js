@@ -143,30 +143,9 @@ if (EMBED) {
   if (SKIN_HUD) document.body.classList.add('skin-hud');
 }
 
-/* skin=hud：面板文案换成英文（宿主 ironman-hud 是全英文界面）。
-   只在嵌入+该皮肤下生效，mk7.html 主页与 jarvis-console 不受影响。 */
-if (document.body.classList.contains('skin-hud')) {
-  const EN = {
-    'btn-rotate': ['ROTATE', 'Auto-rotate (Space)'],
-    'btn-lineonly': ['LINES', 'Lines only, hide surface (O)'],
-    'btn-split': ['SPLIT', 'Detach / assemble armor (E)'],
-    'btn-flow': ['FLOW', 'Line flow pulse (G)'],
-    'btn-bg': ['SPACE', '3D spatial backdrop (B)'],
-    'btn-invert': ['DIM', 'Dim / bright lines (L)'],
-    'btn-reset': ['RESET', 'Reset view (R)'],
-  };
-  for (const [id, [label, title]] of Object.entries(EN)) {
-    const b = document.getElementById(id);
-    if (b) { b.textContent = label; b.title = title; }
-  }
-  const SL = { 'rg-strength': 'GLOW', 'rg-width': 'WIDTH', 'rg-surface': 'SURFACE' };
-  for (const [id, label] of Object.entries(SL)) {
-    const input = document.getElementById(id);
-    const span = input && input.parentElement.querySelector('span');
-    if (span) span.textContent = label;
-    if (input && input.parentElement) input.parentElement.title = label.toLowerCase() + ' control';
-  }
-}
+/* 说明：面板文案已全部英文化（宿主 ironman-hud 本来就是全英文界面），
+   原先 skin=hud 下单独把标签换成英文的那段映射表已删除，避免两套词表打架
+   （例如 HTML 里是 BG，映射表原本写 SPACE）。skin-hud 现在只管 CSS 皮肤。 */
 
 /* ------------------------------------------------------------------ */
 /* 渲染器 / 场景                                                        */
@@ -830,7 +809,7 @@ const ldText = $('ld-text');
 function setProgress(p, mb) {
   pctEl.textContent = Math.round(p * 100) + '%';
   progEl.style.strokeDashoffset = String(213.6 * (1 - p));
-  if (mb !== undefined) ldText.textContent = `加载装甲模型… ${mb} MB`;
+  if (mb !== undefined) ldText.textContent = `Loading armor model… ${mb} MB`;
 }
 
 async function boot() {
@@ -1000,7 +979,7 @@ async function boot() {
 
     $('st-tris').textContent = state.tris.toLocaleString('en-US');
     const ms = Math.round(performance.now() - t0);
-    ldText.textContent = `${meshes} 个部件 · ${ms} ms`;
+    ldText.textContent = `${meshes} ${meshes === 1 ? 'part' : 'parts'} · ${ms} ms`;
     setProgress(1);
     setTimeout(() => loaderEl.classList.add('done'), 220);
 
@@ -1185,7 +1164,7 @@ function onResize() {
 function setInvert(on) {
   state.invert = on;
   const b = $('btn-invert');
-  b.textContent = on ? '亮线' : '暗线';
+  b.textContent = on ? 'BRIGHT' : 'DIM';
   b.classList.toggle('on', on);
 }
 
@@ -1383,7 +1362,7 @@ function toggleSplit() {
     };
   }
   const b = $('btn-split');
-  b.textContent = state.split ? '合并' : '拆卸';
+  b.textContent = state.split ? 'MERGE' : 'SPLIT';
   b.classList.toggle('on', state.split);
 
   // 相机后拉 + 视点上移 / 复位

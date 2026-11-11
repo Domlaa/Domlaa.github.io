@@ -55,7 +55,7 @@ function init() {
   try {
     initRenderer();
   } catch (err) {
-    fail('无法初始化 WebGL：' + (err?.message || err));
+    fail('WebGL init failed: ' + (err?.message || err));
     return;
   }
   initScene();
@@ -163,7 +163,7 @@ function loadModel() {
   const loader = new FBXLoader(manager);
   loader.load(CONFIG.url, (obj) => onLoaded(obj, started), onProgress, (err) => {
     console.error(err);
-    fail('FBX 解析失败，请检查文件是否完整（' + (err?.message || '未知错误') + '）');
+    fail('FBX parse failed — the file may be incomplete (' + (err?.message || 'unknown error') + ')');
   });
 }
 
@@ -226,7 +226,7 @@ function normalize(obj) {
   obj.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(obj);
   const size = box.getSize(new THREE.Vector3());
-  if (!isFinite(size.y) || size.y <= 0) throw new Error('模型尺寸异常');
+  if (!isFinite(size.y) || size.y <= 0) throw new Error('Invalid model size');
 
   // 统一高度，防止不同来源模型（厘米/米/英寸）尺寸离谱
   obj.scale.multiplyScalar(CONFIG.targetHeight / size.y);
@@ -333,8 +333,8 @@ function applyMode() {
 function setMode(mode) {
   state.mode = mode;
   applyMode();
-  const label = { suit: '战衣', steel: '钢', matte: '哑光' }[mode];
-  $('btn-material').textContent = '材质 · ' + label;
+  const label = { suit: 'SUIT', steel: 'STEEL', matte: 'MATTE' }[mode];
+  $('btn-material').textContent = 'MATERIAL · ' + label;
   $('btn-material').classList.toggle('on', mode !== 'steel');
 }
 
@@ -350,7 +350,7 @@ function setBodyVisible(on) {
   });
   const b = $('btn-inner');
   if (b) {
-    b.textContent = on ? '内衬 · 显' : '内衬 · 隐';
+    b.textContent = on ? 'LINER · ON' : 'LINER · OFF';
     b.classList.toggle('on', on);
   }
   updateMeshStat();

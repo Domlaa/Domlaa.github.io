@@ -71,12 +71,12 @@ body {
   background: var(--glass); border: 1px solid var(--line); border-radius: 999px;
   backdrop-filter: blur(12px) saturate(130%); -webkit-backdrop-filter: blur(12px) saturate(130%);
   box-shadow: 0 14px 40px rgba(0, 0, 0, .45);
-  max-width: calc(100vw - 24px); flex-wrap: wrap; justify-content: center;
+  width: max-content; max-width: calc(100vw - 24px); flex-wrap: wrap; justify-content: center;
 }
 .toolbar button {
   appearance: none; border: 1px solid transparent; background: transparent; color: #b9c4d0;
-  font-family: var(--sans); font-size: 12px; letter-spacing: .04em;
-  padding: 9px 15px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+  font-family: var(--sans); font-size: 12px; letter-spacing: .03em;
+  padding: 9px 12px; border-radius: 999px; cursor: pointer; white-space: nowrap;
   transition: color .18s, background .18s, border-color .18s;
 }
 .toolbar button:hover { color: #fff; background: rgba(255, 255, 255, .07); }

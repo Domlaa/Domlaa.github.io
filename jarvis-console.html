@@ -175,20 +175,20 @@ header{display:grid;grid-template-columns:minmax(240px,1.7fr) repeat(5,minmax(0,
       <figure class="rig" data-side="l">
         <iframe class="rig-frame loading" scrolling="no" tabindex="-1"
                 src="mk7.html?embed=1&amp;line=1&amp;flat=1&amp;auto=1&amp;rot=-24&amp;fit=1.22&amp;corex=-0.0155&amp;corey=0.742&amp;model=model/tiny/hulk%2Bbuster2_optimized.glb"
-                title="MARK XLIV HULK BUSTER 结构线稿装甲"></iframe>
+                title="MARK XLIV HULK BUSTER edge-line armor"></iframe>
         <figcaption class="rig-tag"><i></i><b>MARK XLIV</b><span>HULK BUSTER</span></figcaption>
       </figure>
       <figure class="rig" data-side="r">
         <iframe class="rig-frame loading" scrolling="no" tabindex="-1"
                 src="mk7.html?embed=1&amp;line=1&amp;flat=1&amp;auto=1&amp;rot=26&amp;fit=1.06&amp;model=model/tiny/irobny2_optimized.glb"
-                title="MARK VII 结构线稿装甲"></iframe>
+                title="MARK VII edge-line armor"></iframe>
         <figcaption class="rig-tag"><i></i><b>MARK VII</b><span>EDGE LINE</span></figcaption>
       </figure>
     </div>
     <div class="ov console">◱ CONSOLE</div>
     <div class="ov music" id="bgm">
-      <span class="mbtn" id="bgmBtn" title="开/关背景音乐（M 键）"><i class="eq"><b></b><b></b><b></b></i><em id="bgmTxt">BGM OFF</em></span>
-      <input type="range" id="bgmVol" min="0" max="100" step="1" value="60" title="音量">
+      <span class="mbtn" id="bgmBtn" title="Toggle background music (M)"><i class="eq"><b></b><b></b><b></b></i><em id="bgmTxt">BGM OFF</em></span>
+      <input type="range" id="bgmVol" min="0" max="100" step="1" value="60" title="Volume">
       <span class="mval" id="bgmVal">60</span>
     </div>
     <audio id="bgmAudio" data-src="haloflux/audio/sw421k.mp3" loop preload="auto" playsinline></audio>
@@ -249,65 +249,65 @@ const easeO = t => 1 - Math.pow(1 - t, 3);
 /* ---------- live configuration (driven by the console) ---------- */
 // [key, label, min, max, step, group, rebuild]
 const PARAMS = [
-  ['tempo', '整体节拍速度', 0.4, 2.5, 0.05, '全局'],
-  ['camera', '自动运镜 (0关 1开)', 0, 1, 1, '全局'],
-  ['camZoom', '运镜推近幅度', 0, 2, 0.05, '全局'],
-  ['glow', '柔光层强度', 0, 1.5, 0.05, '全局'],
-  ['scan', '扫描线 (0关 1开)', 0, 1, 1, '全局'],
+  ['tempo', 'Global tempo', 0.4, 2.5, 0.05, 'GLOBAL'],
+  ['camera', 'Auto camera move (0 off / 1 on)', 0, 1, 1, 'GLOBAL'],
+  ['camZoom', 'Camera dolly amount', 0, 2, 0.05, 'GLOBAL'],
+  ['glow', 'Soft glow strength', 0, 1.5, 0.05, 'GLOBAL'],
+  ['scan', 'Scan lines (0 off / 1 on)', 0, 1, 1, 'GLOBAL'],
 
-  ['ringSpeed', '圆环转动幅度/速度', 0, 3, 0.05, '圆环'],
-  ['ringPause', '圆环停顿时长', 0, 3, 0.05, '圆环'],
-  ['ringWidth', '环带厚度', 0.6, 1.6, 0.02, '圆环', 'resize'],
-  ['rimBright', '内外缘细线亮度', 0, 2, 0.05, '圆环'],
-  ['rimWidth', '内外缘细线带宽度', 0.3, 2.5, 0.05, '圆环', 'slots'],
-  ['dataFlicker', '数据块刷新/闪烁', 0, 4, 0.1, '圆环'],
+  ['ringSpeed', 'Ring spin amount / speed', 0, 3, 0.05, 'RING'],
+  ['ringPause', 'Ring pause duration', 0, 3, 0.05, 'RING'],
+  ['ringWidth', 'Ring band thickness', 0.6, 1.6, 0.02, 'RING', 'resize'],
+  ['rimBright', 'Ring rim line brightness', 0, 2, 0.05, 'RING'],
+  ['rimWidth', 'Ring rim band width', 0.3, 2.5, 0.05, 'RING', 'slots'],
+  ['dataFlicker', 'Data blocks refresh / flicker', 0, 4, 0.1, 'RING'],
 
-  ['webBright', '底层网线亮度', 0.1, 3, 0.05, '圈内', 'web'],
-  ['webPulseBase', '网线闪烁层基础亮度', 0, 1, 0.02, '圈内'],
-  ['webPulseAmp', '网线闪烁层节拍亮度', 0, 1, 0.02, '圈内'],
-  ['webSpin', '网线整体转速', 0, 5, 0.1, '圈内'],
-  ['runnerCount', '单独亮线 数量', 0, 900, 1, '圈内'],
-  ['runnerBright', '单独亮线 亮度', 0, 2, 0.05, '圈内'],
-  ['runnerWidth', '单独亮线 粗细', 0.3, 3, 0.05, '圈内'],
-  ['runnerSpeed', '单独亮线 速度', 0.1, 4, 0.05, '圈内'],
-  ['runnerVariety', '单独亮线 速度差异', 0, 1, 0.05, '圈内'],
-  ['cometPerBeat', '成组光束 每拍数量', 0, 6, 0.1, '圈内'],
-  ['cometBurst', '成组光束 重拍爆发数', 0, 12, 0.5, '圈内'],
-  ['cometTrickle', '成组光束 拍间零星(每秒)', 0, 6, 0.1, '圈内'],
-  ['cometLines', '成组光束 每组线数', 0.3, 3, 0.05, '圈内'],
-  ['cometWidth', '成组光束 宽度', 0.3, 3, 0.05, '圈内'],
-  ['cometBright', '成组光束 亮度', 0.1, 2.5, 0.05, '圈内'],
-  ['cometGlow', '成组光束 柔光', 0, 3, 0.05, '圈内'],
-  ['cometSpeed', '成组光束 速度', 0.3, 3, 0.05, '圈内'],
-  ['cometFollow', '成组光束 跟随圆环 (0/1)', 0, 1, 1, '圈内'],
+  ['webBright', 'Web lines brightness', 0.1, 3, 0.05, 'INSIDE', 'web'],
+  ['webPulseBase', 'Web pulse base brightness', 0, 1, 0.02, 'INSIDE'],
+  ['webPulseAmp', 'Web pulse beat brightness', 0, 1, 0.02, 'INSIDE'],
+  ['webSpin', 'Web spin speed', 0, 5, 0.1, 'INSIDE'],
+  ['runnerCount', 'Runner count', 0, 900, 1, 'INSIDE'],
+  ['runnerBright', 'Runner brightness', 0, 2, 0.05, 'INSIDE'],
+  ['runnerWidth', 'Runner width', 0.3, 3, 0.05, 'INSIDE'],
+  ['runnerSpeed', 'Runner speed', 0.1, 4, 0.05, 'INSIDE'],
+  ['runnerVariety', 'Runner speed variety', 0, 1, 0.05, 'INSIDE'],
+  ['cometPerBeat', 'Comet per beat', 0, 6, 0.1, 'INSIDE'],
+  ['cometBurst', 'Comet burst count', 0, 12, 0.5, 'INSIDE'],
+  ['cometTrickle', 'Comet trickle (per sec)', 0, 6, 0.1, 'INSIDE'],
+  ['cometLines', 'Comet lines per group', 0.3, 3, 0.05, 'INSIDE'],
+  ['cometWidth', 'Comet width', 0.3, 3, 0.05, 'INSIDE'],
+  ['cometBright', 'Comet brightness', 0.1, 2.5, 0.05, 'INSIDE'],
+  ['cometGlow', 'Comet glow', 0, 3, 0.05, 'INSIDE'],
+  ['cometSpeed', 'Comet speed', 0.3, 3, 0.05, 'INSIDE'],
+  ['cometFollow', 'Comet follows ring (0/1)', 0, 1, 1, 'INSIDE'],
 
-  ['beamBright', '伸缩光束 亮度', 0, 2.5, 0.05, '环外'],
-  ['beamLen', '伸缩光束 长度', 0.2, 1.8, 0.05, '环外'],
-  ['beamWidth', '伸缩光束 线粗细', 0.3, 3, 0.05, '环外'],
-  ['beamBounce', '回弹波浪层 强度', 0, 2, 0.05, '环外'],
-  ['beamGlow', '伸缩光束 柔光', 0, 6, 0.1, '环外'],
-  ['dashBright', '流动短线 亮度', 0, 2, 0.05, '环外'],
-  ['hazeCount', '宽光带 数量', 0, 30, 1, '环外'],
-  ['hazeBright', '宽光带 亮度', 0, 3, 0.05, '环外'],
-  ['flyerCount', '飞出流线(单独) 数量', 0, 3, 0.05, '环外', 'flyers'],
-  ['flyerBright', '飞出流线(单独) 亮度', 0, 3, 0.05, '环外'],
-  ['flyerWidth', '飞出流线 粗细', 0.3, 3, 0.05, '环外'],
-  ['flyerSpeed', '飞出流线 速度', 0.2, 3, 0.05, '环外'],
-  ['burstRate', '飞出流线(成组) 频率', 0, 5, 0.1, '环外'],
-  ['burstSize', '飞出流线(成组) 每组数量', 0.2, 3, 0.05, '环外'],
-  ['burstBright', '飞出流线(成组) 亮度', 0, 2.5, 0.05, '环外'],
-  ['flareRate', '根部闪光 频率', 0, 5, 0.1, '环外'],
-  ['flareBright', '根部闪光 亮度', 0, 2, 0.05, '环外'],
-  ['rimDensity', '内外缘细线 密度', 0.3, 3, 0.05, '圆环'],
-  ['depthBlur', '远景虚化 (环外远层)', 0, 5, 0.1, '空间层次'],
-  ['depthDim', '远景亮度', 0, 1.5, 0.05, '空间层次'],
-  ['webBlur', '圈内底层虚化', 0, 4, 0.1, '空间层次', 'web'],
-  ['parallax', '视差 (运镜时远近错位)', 0, 1.5, 0.05, '空间层次'],
-  ['bokeh', '前景光斑 数量', 0, 80, 1, '空间层次'],
-  ['bokehBright', '前景光斑 亮度', 0, 3, 0.05, '空间层次'],
-  ['atmos', '空间雾气', 0, 3, 0.05, '空间层次'],
-  ['ringShadow', '圆环遮挡阴影', 0, 2, 0.05, '空间层次'],
-  ['vignette', '暗角', 0, 1.5, 0.05, '空间层次'],
+  ['beamBright', 'Beam brightness', 0, 2.5, 0.05, 'OUTSIDE'],
+  ['beamLen', 'Beam length', 0.2, 1.8, 0.05, 'OUTSIDE'],
+  ['beamWidth', 'Beam line width', 0.3, 3, 0.05, 'OUTSIDE'],
+  ['beamBounce', 'Beam bounce strength', 0, 2, 0.05, 'OUTSIDE'],
+  ['beamGlow', 'Beam glow', 0, 6, 0.1, 'OUTSIDE'],
+  ['dashBright', 'Dash brightness', 0, 2, 0.05, 'OUTSIDE'],
+  ['hazeCount', 'Haze band count', 0, 30, 1, 'OUTSIDE'],
+  ['hazeBright', 'Haze band brightness', 0, 3, 0.05, 'OUTSIDE'],
+  ['flyerCount', 'Flyers (single) count', 0, 3, 0.05, 'OUTSIDE', 'flyers'],
+  ['flyerBright', 'Flyers (single) brightness', 0, 3, 0.05, 'OUTSIDE'],
+  ['flyerWidth', 'Flyer width', 0.3, 3, 0.05, 'OUTSIDE'],
+  ['flyerSpeed', 'Flyer speed', 0.2, 3, 0.05, 'OUTSIDE'],
+  ['burstRate', 'Flyer burst rate', 0, 5, 0.1, 'OUTSIDE'],
+  ['burstSize', 'Flyers per burst', 0.2, 3, 0.05, 'OUTSIDE'],
+  ['burstBright', 'Flyer burst brightness', 0, 2.5, 0.05, 'OUTSIDE'],
+  ['flareRate', 'Root flare rate', 0, 5, 0.1, 'OUTSIDE'],
+  ['flareBright', 'Root flare brightness', 0, 2, 0.05, 'OUTSIDE'],
+  ['rimDensity', 'Ring rim line density', 0.3, 3, 0.05, 'RING'],
+  ['depthBlur', 'Far depth blur', 0, 5, 0.1, 'DEPTH'],
+  ['depthDim', 'Far depth brightness', 0, 1.5, 0.05, 'DEPTH'],
+  ['webBlur', 'Inner layer blur', 0, 4, 0.1, 'DEPTH', 'web'],
+  ['parallax', 'Parallax (camera move)', 0, 1.5, 0.05, 'DEPTH'],
+  ['bokeh', 'Bokeh count', 0, 80, 1, 'DEPTH'],
+  ['bokehBright', 'Bokeh brightness', 0, 3, 0.05, 'DEPTH'],
+  ['atmos', 'Atmosphere haze', 0, 3, 0.05, 'DEPTH'],
+  ['ringShadow', 'Ring occlusion shadow', 0, 2, 0.05, 'DEPTH'],
+  ['vignette', 'Vignette', 0, 1.5, 0.05, 'DEPTH'],
 ];
 const BASE = {
   tempo: 1, camera: 1, camZoom: 1, glow: 1, scan: 1,
@@ -1572,15 +1572,15 @@ panel.id = 'cpanel';
 const groups = [...new Set(PARAMS.map(p => p[5]))];
 panel.innerHTML = `
   <div class="top"><b>CONSOLE</b>
-    <button data-p="MINE" id="pMine">我的默认</button><button data-p="A">预设 A 暗底</button><button data-p="B">预设 B 亮线</button><button id="cSaveDef">保存为默认</button>
-    <button id="cReset">重置当前预设</button><button id="cCopy">导出</button><button id="cImp">导入</button><button id="cClose">✕</button>
-    <textarea id="cText" placeholder="粘贴导出的 JSON，再点一次「导入」应用"></textarea>
+    <button data-p="MINE" id="pMine">MINE</button><button data-p="A">A · DARK</button><button data-p="B">B · BRIGHT</button><button id="cSaveDef">SAVE</button>
+    <button id="cReset">RESET</button><button id="cCopy">EXPORT</button><button id="cImp">IMPORT</button><button id="cClose">✕</button>
+    <textarea id="cText" placeholder="Paste exported JSON, then hit IMPORT again to apply"></textarea>
   </div>
   <div class="body">${groups.map((g, gi) => `<details ${gi < 2 ? 'open' : ''}><summary>${g}</summary>${
     PARAMS.filter(p => p[5] === g).map(p => `<div class="row" data-k="${p[0]}"><label title="${p[1]}">${p[1]}</label>
       <input type="range" min="${p[2]}" max="${p[3]}" step="${p[4]}"><input type="number" min="${p[2]}" max="${p[3]}" step="${p[4]}"></div>`).join('')
   }</details>`).join('')}</div>
-  <div class="hint">C 键 开/关控制台 · F 键或双击画面 全屏 · M 键 开/关音乐 · 改动自动保存在本机浏览器</div>`;
+  <div class="hint">C toggles this console · F or double-click for fullscreen · M toggles music · changes are saved in this browser</div>`;
 document.body.appendChild(panel);
 function syncPanel() {
   panel.querySelectorAll('.row').forEach(r => {
@@ -1604,7 +1604,7 @@ panel.querySelector('#cSaveDef').onclick = e => {
   PRESETS.MINE = { ...C };
   try { localStorage.setItem(MINE_KEY, JSON.stringify(PRESETS.MINE)); } catch (err) {}
   curPreset = 'MINE'; pMine.hidden = false; saveCfg(); syncPanel();
-  const b = e.currentTarget; b.textContent = '已保存 ✓'; setTimeout(() => b.textContent = '保存为默认', 1600);
+  const b = e.currentTarget; b.textContent = 'SAVED ✓'; setTimeout(() => b.textContent = 'SAVE', 1600);
 };
 panel.querySelector('#cClose').onclick = () => panel.classList.remove('open');
 panel.querySelector('#cCopy').onclick = () => {
@@ -1759,7 +1759,7 @@ document.addEventListener('keydown', e => {
     if (e.target.matches('input,textarea')) return;
     if (e.key === 'm' || e.key === 'M') toggle();
   });
-  au.addEventListener('error', () => { txt.textContent = 'BGM 文件未找到'; box.classList.remove('on', 'wait'); });
+  au.addEventListener('error', () => { txt.textContent = 'BGM FILE MISSING'; box.classList.remove('on', 'wait'); });
   // pause in background tabs / when the phone locks, resume on return
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { if (!au.paused) { cancelAnimationFrame(fadeRaf); au.pause(); } }

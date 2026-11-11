@@ -55,7 +55,7 @@ function prepareGeometry(root) {
       parts.push(g);
     }
   });
-  if (parts.length === 0) throw new Error('GLB 中未找到网格数据');
+  if (parts.length === 0) throw new Error('No mesh data found in GLB');
 
   // 合并（无 index 的先转 indexed）
   let merged;

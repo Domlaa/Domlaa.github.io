@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MARK LXXXV · 3D 模型展示</title>
-<meta name="description" content="钢铁侠 Mark 85 高精度 3D 模型在线展示，Three.js 实时渲染，支持旋转、缩放、材质切换">
+<title>MARK LXXXV · 3D MODEL SHOWCASE</title>
+<meta name="description" content="Iron Man Mark 85 high-detail 3D model viewer — real-time Three.js rendering with rotate, zoom and material switching">
 <link rel="stylesheet" href="./css/showcase.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%23e8b45a' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23ffe1a8'/%3E%3C/svg%3E">
 <script type="importmap">
@@ -24,7 +24,7 @@
   <header class="masthead">
     <p class="eyebrow">IRON MAN · MARK LXXXV</p>
     <h1>MK<span>85</span></h1>
-    <p class="sub">高精度战甲模型 · FBX 实时渲染</p>
+    <p class="sub">High-detail armor model · real-time FBX render</p>
   </header>
 
   <aside class="stats" id="stats">
@@ -34,20 +34,20 @@
     <div class="stat"><span class="k">LOAD</span><span class="v" id="st-load">--</span></div>
   </aside>
 
-  <nav class="toolbar" aria-label="视图控制">
-    <button id="btn-rotate" class="on" title="自动旋转 (Space)">自动旋转</button>
-    <button id="btn-explode" title="拆解 (E)">拆解</button>
-    <button id="btn-assemble" class="on" title="组装 (A)">组装</button>
-    <button id="btn-material" class="on" title="切换材质 (M)">材质 · 战衣</button>
-    <button id="btn-inner" title="显示/隐藏内衬人偶 (I)">内衬 · 隐</button>
-    <button id="btn-shot" title="保存当前画面 (S)">截图</button>
-    <button id="btn-reset" title="重置视角 (R)">重置</button>
-    <button id="btn-full" title="全屏 (F)">全屏</button>
+  <nav class="toolbar" aria-label="View controls">
+    <button id="btn-rotate" class="on" title="Auto-rotate (Space)">ROTATE</button>
+    <button id="btn-explode" title="Disassemble (E)">DISASSEMBLE</button>
+    <button id="btn-assemble" class="on" title="Assemble (A)">ASSEMBLE</button>
+    <button id="btn-material" class="on" title="Cycle material (M)">MATERIAL · SUIT</button>
+    <button id="btn-inner" title="Show / hide inner figure (I)">LINER · OFF</button>
+    <button id="btn-shot" title="Save frame (S)">SHOT</button>
+    <button id="btn-reset" title="Reset view (R)">RESET</button>
+    <button id="btn-full" title="Fullscreen (F)">FULL</button>
   </nav>
 
-  <p class="hint">拖拽旋转 · 滚轮缩放 · 双击重置 · E 拆解 / A 组装 / I 内衬</p>
-  <a class="back" href="./index.html">全息展示 →</a>
-  <a class="back back2" href="./mk7.html">MK VII 线稿 →</a>
+  <p class="hint">Drag to rotate · scroll to zoom · double-click to reset · E disassemble / A assemble / I liner</p>
+  <a class="back" href="./index.html">HOLOGRAPHIC VIEW →</a>
+  <a class="back back2" href="./mk7.html">MK VII EDGE LINE →</a>
 
   <!-- 加载状态 -->
   <div class="loader" id="loader">
@@ -55,16 +55,16 @@
       <circle class="ring-bg" cx="32" cy="32" r="27"></circle>
       <circle class="ring-fg" id="ld-ring" cx="32" cy="32" r="27"></circle>
     </svg>
-    <p class="ld-title">正在加载战甲模型</p>
+    <p class="ld-title">Loading armor model</p>
     <div class="bar"><i id="ld-bar"></i></div>
     <p class="ld-meta"><span id="ld-pct">0%</span><span id="ld-size">19.0 MB</span></p>
   </div>
 
   <!-- 错误状态 -->
   <div class="error hidden" id="error">
-    <p class="err-title">模型加载失败</p>
+    <p class="err-title">MODEL LOAD FAILED</p>
     <p class="err-msg" id="err-msg"></p>
-    <button onclick="location.reload()">重新加载</button>
+    <button onclick="location.reload()">RELOAD</button>
   </div>
 
   <script type="module" src="./js/showcase/main.js"></script>
