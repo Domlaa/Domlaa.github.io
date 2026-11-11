@@ -2,12 +2,11 @@
 
 实时渲染的钢铁侠战甲全息投影展示页，部署于 GitHub Pages：**https://domlaa.github.io/**
 
-站点含三个独立页面：
+站点含两个独立页面：
 
 | 页面 | 地址 | 模型 | 特点 |
 | --- | --- | --- | --- |
 | 全息拆解展示 | `/` | `assets/models/armor.glb`（1.2 万面） | 全息材质、10 模块拆解、HUD 指示线 |
-| MK85 实景模型 | `/mk85.html` | `assets/models/mk85.fbx`（62 万面） | 写实 PBR 渲染、仅外部战甲（26 件）、拆解组装、材质切换、截图导出 |
 | MK7 线稿渲染 | `/mk7.html` | `assets/models/armor2.glb`（14 万面） | 屏幕空间边缘检测、表面线条叠加、暗线/亮线双模式、截图导出 |
 
 ![tech](https://img.shields.io/badge/Three.js-r187-7de8ff) ![tech](https://img.shields.io/badge/WebGL-2.0-7de8ff) ![tech](https://img.shields.io/badge/build-none-brightgreen)
@@ -40,18 +39,14 @@
 
 ```
 index.html                 入口（importmap + HUD 结构）
-mk85.html                  MK85 实景模型页
 mk7.html                   MK VII 线稿渲染页
 css/mk7.css                MK VII 页样式
 css/hud.css                HUD 全部样式与响应式
-css/showcase.css           模型展台样式
 assets/models/armor.glb    战甲模型（全息页，部署用）
-assets/models/mk85.fbx     MK85 模型（实景页，19 MB）
 assets/models/armor2.glb   MK VII 模型（线稿页，38 MB，含 4K PBR 贴图）
 lib/three/                 Three.js r187 + 本地化 addons
 js/
 ├─ main.js                 编排：加载 → 显现 → 渲染循环
-├─ showcase/main.js        MK85 页：FBX 加载 / 归一化 / 材质 / 取景
 ├─ showcase7/main.js       MK7 页：三通道渲染 + 边缘检测线稿
 ├─ config/armor.config.js  模块定义、切分阈值、拆解偏移、场景参数
 ├─ core/SceneManager.js    渲染器 / 相机 / OrbitControls / 辉光 / 平台网格
@@ -113,44 +108,7 @@ git add -A && git commit -m "feat: 3D 全息战甲展示系统" && git push
 
 ---
 
-## 九、MK85 实景模型页（`/mk85.html`）
-
-`assets/models/mk85.fbx` 与前一个 GLB 是两个不同来源的模型，这一页单独做，目标是**先保证稳定、正确地展示模型**，不加任何后处理特效。
-
-### 模型情况
-
-- 二进制 FBX 7400，19 MB，**28 个按解剖命名的部件**（`head` / `neck` / `chest` / `weist` / `hip` / `upper_arm` / `elbow` / `lower_leg` / `foot_left` …），共 624,342 三角面、187 万顶点。
-- **贴图不可用**：FBX 内记录的是作者本机绝对路径（`C:\Users\jedid\Desktop\Textures\[2K]Metal002\Metal019_2K_Color.jpg`），文件未随模型提供。加载时用一张 1×1 白图顶掉这些请求，避免 404 刷屏。
-
-### 因此做了什么
-
-- **归一化**：按包围盒把模型缩放到统一 1.95 高度、水平居中、脚底贴地，再据此自动计算相机距离 —— 换任何尺寸单位的模型都不会跑飞或过大过小。
-- **只显示外部战甲**：`inner_armor`（贯穿全身的深色内衬，64k 面）与 `neck` 属于人偶身体，默认隐藏，画面里只有 26 个装甲件（555,670 面）。拆解时看到的是纯装甲片悬浮，而不是一具黑色人偶。需要对比时点「内衬」按钮或按 `I` 可随时切换回来。
-- **按部件上色**：既然贴图缺失，就利用部件名建立 `部件 → 色调` 映射（头/膝/腕/腰为金，躯干四肢为红），还原 MK85 的红金配色；另有「钢」与「哑光」两种材质用于观察造型。
-- **拆解 / 组装**：26 个可见部件各自挂在锚点 `pivot` 上（`pivot.attach(mesh)` 保持世界变换，视觉零位移），拆解只改 `pivot.position`。方向按部件语义给定 —— 头向上、胸/腰/髋向前脱离、四肢向外。1.5s 缓动，位移恒基于 `base` 计算，反复拆装无累积误差（实测 3 轮偏差 0）。
-- **材质与环境**：`MeshStandardMaterial` + `RoomEnvironment` 生成的 PMREM 环境贴图（金属没有环境反射会发黑），三点布光 + 方向光阴影 + 径向渐隐接影地面。
-- **交互**：OrbitControls 拖拽/缩放/双击复位、自动旋转、**拆解 / 组装**、**内衬显隐**、材质切换、全屏、**保存当前画面为 PNG**（合成深色底，不含 UI）。快捷键：`空格` 旋转、`E` 拆解、`A` 组装、`M` 材质、`I` 内衬、`S` 截图、`R` 复位、`F` 全屏。
-- **加载体验**：显示真实进度百分比与已下载 MB 数；失败时展示错误信息而不是白屏。
-- **取景**：按「避让顶部标题、底部工具栏」后的可用区域做垂直居中（`safeTop` / `safeBottom`），窄屏自动放大留白并把工具栏改为 4 列网格（两行），窗口尺寸变化后自动重新取景。
-- **加载体验**：显示真实进度百分比与已下载 MB 数；失败时展示错误信息而不是白屏。
-- **取景**：窄屏（`aspect < 0.85`）自动放大留白，避免头部压住标题、脚被底部工具栏遮挡；窗口尺寸变化后自动重新取景。
-
-### 换模型只需改两处
-
-```js
-// js/showcase/main.js 顶部
-const CONFIG = { url: '../../assets/models/mk85.fbx', fileBytes: 19926540, targetHeight: 1.95, ... };
-
-// 若新模型部件名不同，补一张映射表即可（未命中时按 leg/arm/hip 等关键词兜底）
-const PART_TONE = { head: 'gold', chest: 'red', ... };
-
-// 哪些部件属于「人偶身体」需要默认隐藏（默认是 inner_armor + neck）
-const BODY_PARTS = new Set(['inner_armor', 'neck']);
-```
-
----
-
-## 十、MK VII 线稿渲染页（`/mk7.html`）
+## 九、MK VII 线稿渲染页（`/mk7.html`）
 
 `assets/models/armor2.glb`（38 MB）是重新生成的模型，与前面两个都不同：**142,622 面的单件装甲**（`Iron_Man_mark_7_Subsurf_`，蒙皮网格），带 4 张 4096² 贴图。
 
