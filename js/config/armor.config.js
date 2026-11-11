@@ -23,6 +23,12 @@ export const ARMOR_SUB = 'HULK BUSTER';
  */
 export const REACTOR_MOUNT = { x: -0.0155, y: 0.742, z: 0.158 };
 
+/**
+ * REACTOR_MOUNT is only a *search hint* now: at boot the reactor is snapped onto the real
+ * socket floor (ArcReactor.snapToSocket), so small drifts after re-compressing the model
+ * (quantisation changes the normalised bbox) no longer push the core off-centre.
+ */
+
 /** Spatial split thresholds (t = y/H, x left-right, z front-back, model faces +z) */
 export const SEGMENT_THRESHOLDS = {
   helmetTop: 0.885,   // above this t -> helmet
@@ -163,5 +169,5 @@ export const SCENE_CONFIG = {
   particles: 380,
   bg: 0x030912,
   /** Edge line / flow defaults */
-  line: { strength: 0.95, width: 1.1, flow: 0.9, speed: 0.22, surface: 0.30, color: '#9fe8ff' },
+  line: { strength: 0.95, width: 1.1, flow: 0.9, speed: 0.30, surface: 0.30, color: '#9fe8ff' },
 };

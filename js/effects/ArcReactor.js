@@ -29,6 +29,53 @@ export class ArcReactor {
   }
 
   /**
+   * Snap the mount onto the real reactor socket.
+   *
+   * REACTOR_MOUNT is a hand-measured ratio that drifts a little whenever the model is
+   * re-compressed (quantisation changes the normalised bbox), which shows up as the core
+   * sitting a few millimetres off the socket. Instead of trusting the ratio, scan a small
+   * grid around it with rays fired at the chest and take the deepest hit: on this suit the
+   * socket is a circular recess, so its floor is the local minimum of z.
+   *
+   * @param {THREE.Mesh} chestMesh chest module mesh (child of the armor root)
+   * @param {THREE.Object3D} root armor root (rotation must be 0 while probing)
+   * @param {THREE.Vector3} hint mount from mountPoint()
+   * @param {number} height model height
+   * @returns {{position: THREE.Vector3, found: boolean, depth: number}}
+   */
+  static snapToSocket(chestMesh, root, hint, height) {
+    if (!chestMesh) return { position: hint.clone(), found: false, depth: 0 };
+
+    const ray = new THREE.Raycaster();
+    const span = 0.022 * height;      // search half-width around the hint
+    const step = 0.0022 * height;
+    const forward = new THREE.Vector3(0, 0, -1).transformDirection(root.matrixWorld);
+    let best = null;
+
+    for (let dx = -span; dx <= span + 1e-6; dx += step) {
+      for (let dy = -span; dy <= span + 1e-6; dy += step) {
+        const origin = root.localToWorld(
+          new THREE.Vector3(hint.x + dx, hint.y + dy, hint.z + 0.45 * height),
+        );
+        ray.set(origin, forward);
+        ray.far = height;
+        const hits = ray.intersectObject(chestMesh, true);
+        if (!hits.length) continue;
+        const p = root.worldToLocal(hits[0].point.clone());
+        if (!best || p.z < best.z) best = p;
+      }
+    }
+
+    if (!best) return { position: hint.clone(), found: false, depth: 0 };
+
+    // Sit just in front of the socket floor so the disc reads as lying inside the recess
+    // instead of being clipped by the surrounding plate.
+    const position = best.clone();
+    position.z += 0.0035 * height;
+    return { position, found: true, depth: best.z / height };
+  }
+
+  /**
    * @param {THREE.Vector3} position mount point in model space (front of the chest)
    */
   constructor(position) {

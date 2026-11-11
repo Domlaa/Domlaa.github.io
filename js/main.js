@@ -51,13 +51,14 @@ async function boot() {
 
   log('SEGMENTING MODULES…', 0.9);
 
-  // Arc reactor: the chest carries a real circular bay on the sternum; REACTOR_MOUNT
-  // holds its position in normalized coordinates (the suit is asymmetric, so it is not
-  // derivable from the chest bounding box)
+  // Arc reactor: the chest carries a real circular bay on the sternum. REACTOR_MOUNT gives
+  // a starting ratio, then the mount is snapped onto the actual socket floor — the ratio
+  // alone drifts a few millimetres after each model re-compression.
   const chest = armor.modules.get('chest');
   if (chest) {
-    const mount = ArcReactor.mountPoint(armor.height);
-    const reactor = new ArcReactor(mount);
+    const hint = ArcReactor.mountPoint(armor.height);
+    const snap = ArcReactor.snapToSocket(chest.mesh, armor.group, hint, armor.height);
+    const reactor = new ArcReactor(snap.position);
     reactor.pivot.scale.setScalar(armor.height / 2.6);
     armor.attachProceduralModule(reactor);
     armor._reactor = reactor;

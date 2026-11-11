@@ -100,19 +100,22 @@ const QUAD_FRAG = /* glsl */`
     float sweep = fract(uTime * uFlowSpeed / 2.1);   // ÷2.1 让扫速仍是 uFlowSpeed 屏高/秒
     float bandY = mix(-0.55, 1.55, sweep);
     float dz = vUv.y - bandY;
-    float below = exp(-max(dz, 0.0) * 3.4);          // 已扫过（下方）：长余晖
+    float below = exp(-max(dz, 0.0) * 5.5);          // 已扫过（下方）：中等余晖，别铺满整条腿
     float above = exp(-max(-dz, 0.0) * 8.0);         // 未扫到（上方）：短前缘
     float alive = smoothstep(0.0, 0.05, uFlowSpeed); // 速度归零 → 淡出，别在底部留一条死光
     float pulse = mix(below, above, step(0.0, -dz)) * uFlow * alive;
 
     vec3 ink = vec3(0.012, 0.017, 0.024);
-    float baseDim = mix(1.0, 0.78, clamp(uFlow, 0.0, 1.0));
+    // 基线压到 0.52×：光带与静态线条的分离度靠「暗部更暗」撑起来
+    float baseDim = mix(1.0, 0.52, clamp(uFlow, 0.0, 1.0));
     vec3 lineCol = mix(ink, uLineColor * baseDim, lineLight);
-    vec3 pulseCol = uLineColor * (1.06 + 0.82 * pulse);
-    lineCol = mix(lineCol, pulseCol, pulse);
-    col = mix(col, lineCol, edge * mix(0.94, 0.55, lineLight) * (1.0 + pulse * 0.12));
-    // 扫描带在装甲表面留一层极淡辉光，让明暗过渡更柔（仅装甲本体）
-    col += uLineColor * pulse * 0.075 * armorMask;
+    // 光带处直接把线条替换成白热色（纯加色会糊成同一片白，看不出流动）
+    vec3 hot = mix(uLineColor * 2.4, vec3(1.0, 1.02, 1.06), 0.38);
+    float hotK = clamp(pulse * 1.45, 0.0, 1.0);
+    lineCol = mix(lineCol, hot, hotK);
+    col = mix(col, lineCol, edge * mix(0.94, 0.55, lineLight) * (1.0 + hotK * 0.45));
+    // 扫描带在装甲表面留一层辉光，让明暗过渡更柔（仅装甲本体）
+    col += uLineColor * pulse * 0.11 * armorMask;
 
     // ---------- 数字化构建擦除（自下而上） ----------
     // uWipe = 1 时完全显现；< 1 时前沿以上被擦掉，前沿留一条亮线
@@ -140,7 +143,7 @@ export class EdgePass {
   constructor(renderer, cfg = {}) {
     this.renderer = renderer;
     this.cfg = {
-      strength: 0.95, width: 1.1, flow: 0.9, flowSpeed: 0.22,
+      strength: 0.95, width: 1.1, flow: 0.9, flowSpeed: 0.30,
       surface: 0.22, color: 0x9fe8ff, bg: 0x030912, ...cfg,
     };
 
