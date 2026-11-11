@@ -6,7 +6,7 @@
  * retuning the thresholds; the render pipeline stays untouched.
  */
 
-export const MODEL_URL = './assets/models/lite/mk7_lite.glb';
+export const MODEL_URL = './assets/models/lite/hulk-buster2_lite.glb';
 
 export const ARMOR_NAME = 'MARK XLIV';
 export const ARMOR_SUB = 'HULK BUSTER';
