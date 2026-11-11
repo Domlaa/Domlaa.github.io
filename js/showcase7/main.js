@@ -33,9 +33,11 @@ const CONFIG = {
   flat: false,          // 结构线模式：丢弃贴图，装甲换成同一套素模材质（只留几何轮廓线）
   splitZoom: 1.40,      // 拆解态的相机后拉倍率（零件向四周散开，需要让出取景空间）
   splitTargetY: 0.50,   // 拆解态视点高度（× 身高）：整体外扩后重心回到身高中段
+  coreX: 0,             // 反应堆锚点横向偏移（× 身高）：反浩克舱口在模型中线偏左（可 ?corex= 覆盖）
   coreY: 0.775,         // 反应堆锚点高度（× 模型身高）：胸口反应堆中心（可 ?corey= 覆盖）
   coreZ: 0.62,          // 锚点深度兜底值（× 模型最大 z）：正常情况下由射线吸附到真实表面
   coreR: 0.036,         // 反应堆光斑半径（× 模型身高）；宽体模型可调大
+  coreWall: 1.1,        // 离面容差（× 光斑半径）：舱口越凸凹越大，太小会把外晕切在坑沿上
 };
 
 // 允许覆盖模型路径：优先级 ?model=… 查询参数 > 引入脚本的 data-model 属性 > CONFIG 默认值。
@@ -64,14 +66,18 @@ const CONFIG = {
   // 结构线模式（?flat=1）：不吃贴图，多材质模型切成单材质后不会出现错贴图黑洞
   CONFIG.flat = u.get('flat') === '1';
 
-  // 反应堆锚点微调（?corey=0.72&corez=0.55）：不同体型（反浩克 / MK VII）胸位不同，
+  // 反应堆锚点微调（?corex=0.02&corey=0.72）：不同体型（反浩克 / MK VII）胸位不同，
   // 宿主页可按需覆盖，不写则用 CONFIG 默认值。
+  const coreXOverride = Number(u.get('corex') || (scriptEl() && scriptEl().dataset.corex));
+  if (Number.isFinite(coreXOverride)) CONFIG.coreX = coreXOverride;
   const coreYOverride = Number(u.get('corey') || (scriptEl() && scriptEl().dataset.corey));
   if (Number.isFinite(coreYOverride) && coreYOverride > 0) CONFIG.coreY = coreYOverride;
   const coreZOverride = Number(u.get('corez') || (scriptEl() && scriptEl().dataset.corez));
   if (Number.isFinite(coreZOverride) && coreZOverride > 0) CONFIG.coreZ = coreZOverride;
   const coreROverride = Number(u.get('corer') || (scriptEl() && scriptEl().dataset.corer));
   if (Number.isFinite(coreROverride) && coreROverride > 0) CONFIG.coreR = coreROverride;
+  const coreWOverride = Number(u.get('corew') || (scriptEl() && scriptEl().dataset.corew));
+  if (Number.isFinite(coreWOverride) && coreWOverride > 0) CONFIG.coreWall = coreWOverride;
 }
 
 const state = {
@@ -476,7 +482,9 @@ const edgeMat = new THREE.ShaderMaterial({
     // 合成阶段用深度纹理重建每个像素的世界坐标，再按「到锚点的空间距离」衰减 ——
     // 透视、缩放、胸甲倾斜、手臂遮挡全部自动成立，不再是浮在画面上的圆形贴纸。
     uCoreWorld: { value: new THREE.Vector3() },
+    uCoreNrm: { value: new THREE.Vector3(0, 0, 1) },
     uCoreOn: { value: 0 },
+    uCoreWall: { value: CONFIG.coreWall },
     uCoreR: { value: CONFIG.coreR * CONFIG.targetHeight },
     uInvProj: { value: camera.projectionMatrixInverse },
     uCamWorld: { value: camera.matrixWorld },
@@ -497,8 +505,8 @@ const edgeMat = new THREE.ShaderMaterial({
     uniform vec2 uTexel;
     uniform float uStrength, uThickness, uNormalW, uDepthW, uNear, uFar, uLight, uLumW, uDetail, uSurface, uTime, uFlow, uTransparent;
     uniform vec3 uLineColor;
-    uniform vec3 uCoreWorld;
-    uniform float uCoreOn, uCoreR;
+    uniform vec3 uCoreWorld, uCoreNrm;
+    uniform float uCoreOn, uCoreR, uCoreWall;
     uniform mat4 uInvProj, uCamWorld;
 
     float linDepth(vec2 uv) {
@@ -598,19 +606,28 @@ const edgeMat = new THREE.ShaderMaterial({
       col = mix(col, lineCol, edge * clamp(mix(0.92, 0.5, lineLight) * (1.0 + pulse * 1.4), 0.0, 1.0));
 
       // 反应堆核心：贴在装甲表面的真实 3D 光斑。
-      // 发光强度按「像素所在表面点到锚点的空间距离」衰减，不是屏幕距离 ——
-      // 转动时贴着胸甲走（斜看自然压成椭圆、贴近时变大），
-      // 手臂挡在前面那块像素其实在手臂表面、离锚点很远，光也就不会透过去。
-      // r 以反应堆外缘为 1：光核 < 1，外晕略溢出，光环在 ~1.3 处呼吸。
+      // 关键在于「半径在哪量」：旧版用像素表面点到锚点的球面距离，胸口每处起伏都会
+      // 改变半径，环被拉成歪七扭八、看起来不在一个平面上。
+      // 现在把视线与舱口平面（uCoreNrm）求交，半径在**平面内**量 —— 环恒为正圆、
+      // 与舱口严格共面；再用表面点的离面距离只做「粗遮挡」：
+      // 手臂、抬起的护胸这类明显凸出的东西把光挡住，轻度起伏不参与。
       {
-        float r = distance(worldAt(vUv), uCoreWorld) / uCoreR;
+        vec3 camPos = uCamWorld[3].xyz;
+        vec3 pSurf = worldAt(vUv);
+        vec3 rd = pSurf - camPos;
+        float den = dot(rd, uCoreNrm);
+        float t = abs(den) > 1e-5 ? dot(uCoreWorld - camPos, uCoreNrm) / den : 0.0;
+        vec3 pPlane = camPos + rd * t;
+        float r = length(pPlane - uCoreWorld) / uCoreR;
+        float along = dot(pSurf - uCoreWorld, uCoreNrm);   // >0 = 表面比舱口更靠外（凸出）
+        float occl = smoothstep(uCoreR * uCoreWall, uCoreR * uCoreWall * 0.35, along);
         float beat = 0.86 + 0.14 * sin(uTime * 2.35);
         float core = exp(-r * r * 9.0);                               // 白热光核
         float halo = exp(-r * r * 2.2);                               // 冷青外晕
         float ringR = 1.32 + 0.30 * (0.5 + 0.5 * sin(uTime * 2.35 + 1.1));
         float ring = exp(-pow((r - ringR) * 5.0, 2.0));               // 呼吸光环
         vec3 coreCol = vec3(0.58, 0.90, 1.00);
-        float k = uCoreOn;
+        float k = uCoreOn * occl;
         col += coreCol * (core * 2.40 + halo * 0.52 + ring * 0.38) * beat * k;
         col += vec3(1.0) * core * 0.95 * beat * k;                    // 核心偏白，避免整块发青
       }
@@ -886,7 +903,7 @@ async function boot() {
       });
     }
     scene.add(group);
-    // 反应堆锚点：胸口中线前表面。必须在设初始朝向前算（此时 group 无旋转），
+    // 反应堆锚点：胸口前表面。必须在设初始朝向前算（此时 group 无旋转），
     // 否则 Box3 会把 rotation 也算进去，锚点跟着偏。
     {
       group.updateMatrixWorld(true);
@@ -894,19 +911,48 @@ async function boot() {
       const h = bb.max.y - bb.min.y;
       const cx = (bb.min.x + bb.max.x) / 2;
       const y = bb.min.y + h * CONFIG.coreY;
+      // x 允许偏移（coreX × 身高）：反浩克的反应堆舱口不在模型中线上，
+      // 从正中打射线会先命中凸起的胸甲、吸附到错误位置。
+      const ax = cx + h * CONFIG.coreX;
       // 从正前方朝 -Z 打射线，把锚点吸附到胸甲「真实外表面」——
       // bbox 深度比例猜出来的点会嵌进身体（光核半径小于嵌入深度时前表面照不到光），
       // 吸附后 r=0 的亮核正好落在反应堆位置。
       const probe = new THREE.Raycaster(
-        new THREE.Vector3(cx, y, bb.max.z + h),
+        new THREE.Vector3(ax, y, bb.max.z + h),
         new THREE.Vector3(0, 0, -1),
       );
       const hit = probe.intersectObject(group, true)[0];
       state.coreBase = hit
         ? hit.point.clone()
-        : new THREE.Vector3(cx, y, bb.max.z * CONFIG.coreZ);
+        : new THREE.Vector3(ax, y, bb.max.z * CONFIG.coreZ);
       // 光斑半径按真实身高换算（世界单位）：缩放 / 换模型都自动适配
       edgeMat.uniforms.uCoreR.value = h * CONFIG.coreR;
+      // 舱口局部均值面：锚点 + 周围 4 点各打一条射线，把命中的面法线做面积平均。
+      // 胸口不是平的——光斑若按纯球面距离衰减，凸凹的邻面也会被照亮，
+      // 圆环看起来歪歪扭扭不在一个平面上；给着色器这个平面法线后，
+      // 光斑按「面内半径 + 离面容差」绘制，环严格贴着舱口所在的平面。
+      {
+        const nm3 = new THREE.Matrix3();
+        const nSum = new THREE.Vector3();
+        const addN = (h2) => {
+          if (!h2 || !h2.face) return;
+          nm3.getNormalMatrix(h2.object.matrixWorld);
+          nSum.add(h2.face.normal.clone().applyMatrix3(nm3));
+        };
+        addN(hit);
+        const rr = edgeMat.uniforms.uCoreR.value * 0.85;
+        for (const [ox, oy] of [[rr, 0], [-rr, 0], [0, rr], [0, -rr]]) {
+          const p2 = new THREE.Raycaster(
+            new THREE.Vector3(ax + ox, y + oy, bb.max.z + h),
+            new THREE.Vector3(0, 0, -1),
+          );
+          addN(p2.intersectObject(group, true)[0]);
+        }
+        state.coreNrm = nSum.lengthSq() > 1e-6
+          ? nSum.normalize()
+          : new THREE.Vector3(0, 0, 1);
+        edgeMat.uniforms.uCoreNrm.value.copy(state.coreNrm);
+      }
     }
     group.rotation.y = THREE.MathUtils.degToRad(CONFIG.rot0);
     model = group;
@@ -1027,6 +1073,10 @@ function tick() {
     const ry = model.rotation.y;
     _coreWorld.copy(state.coreBase).applyAxisAngle(_upAxis, ry);
     edgeMat.uniforms.uCoreWorld.value.copy(_coreWorld);
+    // 平面法线同样要跟着模型转，否则面内半径会算错方向
+    if (state.coreNrm) {
+      edgeMat.uniforms.uCoreNrm.value.copy(state.coreNrm).applyAxisAngle(_upAxis, ry);
+    }
     // 3D 距离已能裁掉背面像素；这里只兜住「薄壳模型没有背面几何」的极端情况
     const facing = _toCam.copy(camera.position).sub(_coreWorld).normalize()
       .dot(_fwd.set(Math.sin(ry), 0, Math.cos(ry)));
