@@ -41,6 +41,7 @@ const CONFIG = {
   coreFx: 1,            // 反应堆辉光总强度 0~1（?corefx=0 整套关掉：光核 + 外晕 + 波纹）
   coreRip: 1,           // 波纹强度 0~1（?corerip=0 只留光核、去掉外扩波纹）
   coreRad: 0,           // 静态辐射强度 0~1（默认关）：沿刻线 + 平板由内向外渐隐，不随时间推进
+  ripMax: 4.2,          // 波纹最远半径（× 光斑半径）：调小则只留贴着光核的一圈
 };
 
 // 允许覆盖模型路径：优先级 ?model=… 查询参数 > 引入脚本的 data-model 属性 > CONFIG 默认值。
@@ -81,6 +82,11 @@ const CONFIG = {
   if (Number.isFinite(coreROverride) && coreROverride > 0) CONFIG.coreR = coreROverride;
   const coreWOverride = Number(u.get('corew') || (scriptEl() && scriptEl().dataset.corew));
   if (Number.isFinite(coreWOverride) && coreWOverride > 0) CONFIG.coreWall = coreWOverride;
+  // 波纹最远半径（?ripmax=1.6）：控制扩散范围，越小越收敛在光核附近（下限 0.5，避免相位速率被算爆）
+  const ripMaxOverride = Number(u.get('ripmax') || (scriptEl() && scriptEl().dataset.ripmax));
+  if (Number.isFinite(ripMaxOverride) && ripMaxOverride > 0) {
+    CONFIG.ripMax = Math.min(8, Math.max(0.5, ripMaxOverride));
+  }
 
   // 辉光开关：允许为 0（默认 1）。不想要胸口的辉光用 ?corefx=0；
   // 只留光核 + 沿刻线的静态辐射、去掉外扩波纹时用 ?corerip=0（HUD 页就是这么配的）；
@@ -480,6 +486,7 @@ const edgeMat = new THREE.ShaderMaterial({
     uCoreGain: { value: CONFIG.coreFx },
     uCoreRip: { value: CONFIG.coreRip },
     uCoreRad: { value: CONFIG.coreRad },
+    uRipMax: { value: CONFIG.ripMax },
     uInvProj: { value: camera.projectionMatrixInverse },
     uCamWorld: { value: camera.matrixWorld },
     // embed 默认透明输出（只取装甲本体）；solid=1 时不透明输出，
@@ -500,7 +507,7 @@ const edgeMat = new THREE.ShaderMaterial({
     uniform float uStrength, uThickness, uNormalW, uDepthW, uNear, uFar, uLight, uLumW, uDetail, uSurface, uTime, uFlow, uTransparent;
     uniform vec3 uLineColor;
     uniform vec3 uCoreWorld, uCoreNrm;
-    uniform float uCoreOn, uCoreR, uCoreWall, uCoreGain, uCoreRip, uCoreRad;
+    uniform float uCoreOn, uCoreR, uCoreWall, uCoreGain, uCoreRip, uCoreRad, uRipMax;
     uniform mat4 uInvProj, uCamWorld;
 
     float linDepth(vec2 uv) {
@@ -627,12 +634,19 @@ const edgeMat = new THREE.ShaderMaterial({
         // 两者都乘纹路遮罩（上文法线/深度/亮度三路边缘，即甲片刻线）：
         // 刻线被推成白热、平板只留淡青雾 —— 波是顺着机甲纹路往外烧，而非孤立光圈。
         float trace = clamp(edge * 1.7, 0.0, 1.0);                    // 纹路遮罩：缝线处 1
-        float maxR = 4.2;                                             // 扩到 4.2× 光斑半径（覆盖整个胸甲）
-        float ph1 = fract(uTime * 0.22);                              // 4.5s 涌出一道
+        // 波纹最远半径（× 光斑半径）。默认 4.2 覆盖整块胸甲；
+        // 调小（?ripmax=1.6）就只剩贴着光核的一圈涌出即灭，不再铺满胸口。
+        float maxR = uRipMax;
+        // 相位速率按 4.2/maxR 反比补偿：半径缩小后周期同步变短，波前推进速度保持不变，
+        // 否则窄范围下会变成「慢慢爬出一点点」的怪动作。
+        float ph1 = fract(uTime * 0.22 * (4.2 / maxR));               // 默认 4.5s 涌出一道
         float d1 = r - ph1 * maxR;
         float shock = mix(exp(-max(-d1, 0.0) * 6.0), exp(-max(d1, 0.0) * 24.0), step(0.0, d1))
                     * pow(1.0 - ph1, 1.25);
-        float rings = pow(0.5 + 0.5 * sin(r * 5.2 - uTime * 4.0), 14.0) * exp(-r * 0.5);
+        // 同心细纹只在半径够大时才显形：窄范围里 sin 周期挤在一起会变成一堆乱圈，
+        // 所以 maxR ≤ 2.2 时完全关掉细纹，只留主冲击波那一圈（ripmax 调小就是「一波即散」）。
+        float ringsK = clamp((maxR - 2.2) / 1.4, 0.0, 1.0);
+        float rings = pow(0.5 + 0.5 * sin(r * 5.2 - uTime * 4.0), 14.0) * exp(-r * 0.5) * ringsK;
         float rip = max(shock, rings * 0.9) * 2.3;
         vec3 coreCol = vec3(0.58, 0.90, 1.00);
         float k = uCoreOn * occl;
