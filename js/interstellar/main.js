@@ -40,6 +40,9 @@ const CFG = {
   // 泊位（世界系，固定点）：下端口朝下，分离后向「下方」退离再横移泊位
   park: { x: -27, z: 21, height: -13, tilt: 0.13, roll: 0.09 },
   yawLag: 0.18,            // 泊位时的偏航滞后（弧度），对齐过程中收敛到 0
+
+  bh: true,                // 卡冈图雅（黑洞 + 引力透镜吸积盘）开关
+  bhSteps: 96,             // 光线回溯步数（性能/画质折衷）
 };
 
 // 调试用：?yaw=&lat=&h=&spin=&docky=&hatchz=（手动给值则跳过对应的自动实测）
@@ -53,6 +56,8 @@ const manualDock = { docky: false, hatchz: false };
   if (q.has('spin')) CFG.spin = Number(q.get('spin'));
   if (q.has('docky')) { CFG.dockY = Number(q.get('docky')); manualDock.docky = true; }
   if (q.has('hatchz')) manualDock.hatchz = true;
+  if (q.has('bh')) CFG.bh = q.get('bh') !== '0';
+  if (q.has('bhsteps')) CFG.bhSteps = Math.max(16, Math.min(160, Number(q.get('bhsteps')) || 96));
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -88,37 +93,239 @@ const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.05).texture;
 scene.environmentIntensity = 0.8;
 
-/* ---------------- 星空 ---------------- */
-(function stars() {
-  const N = 2800;
-  const pos = new Float32Array(N * 3);
-  const col = new Float32Array(N * 3);
-  const c = new THREE.Color();
-  for (let i = 0; i < N; i++) {
-    const u = Math.random() * 2 - 1;
-    const th = Math.random() * Math.PI * 2;
-    const r = 780 + Math.random() * 1500;
-    const s = Math.sqrt(1 - u * u);
-    pos[i * 3] = r * s * Math.cos(th);
-    pos[i * 3 + 1] = r * u;
-    pos[i * 3 + 2] = r * s * Math.sin(th);
-    const t = Math.random();
-    const b = 0.35 + Math.pow(Math.random(), 2.2) * 0.65;
-    if (t > 0.86) c.setRGB(1, 0.86, 0.72);
-    else if (t > 0.7) c.setRGB(0.78, 0.86, 1);
-    else c.setRGB(0.92, 0.96, 1);
-    col[i * 3] = c.r * b; col[i * 3 + 1] = c.g * b; col[i * 3 + 2] = c.b * b;
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  const m = new THREE.PointsMaterial({
-    size: 2.4, sizeAttenuation: false, vertexColors: true,
-    transparent: true, opacity: 0.95, depthWrite: false,
+/* ---------------- 天空：程序化星空 + 卡冈图雅（引力透镜吸积盘） ---------------- */
+const sky = (() => {
+  const uni = {
+    uTime: { value: 0 },
+    uBH: { value: new THREE.Vector3(-470, -110, -470) },     // 黑洞中心（世界系）
+    uRs: { value: 22 },                                      // 史瓦西半径（世界单位）
+    uDiskN: { value: new THREE.Vector3(0.55, 1.0, -0.30).normalize() }, // 吸积盘法线（近侧对着镜头 → 电影感）
+    uFlow: { value: new THREE.Vector3(0.9, 0, -0.44).normalize() },     // 巡航方向
+    uFlowAxis: { value: new THREE.Vector3() },               // 星空漂移轴（⊥ uFlow）
+    uDrift: { value: 0.0085 },                               // 星空漂移角速度 rad/s
+    uBHOn: { value: CFG.bh ? 1 : 0 },
+    uSteps: { value: CFG.bhSteps },
+  };
+  uni.uFlowAxis.value.crossVectors(UP, uni.uFlow.value).normalize();
+
+  const mat = new THREE.ShaderMaterial({
+    uniforms: uni,
+    side: THREE.BackSide,
+    depthWrite: false,
+    vertexShader: /* glsl */`
+      varying vec3 vWorld;
+      void main() {
+        vec4 w = modelMatrix * vec4(position, 1.0);
+        vWorld = w.xyz;
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }
+    `,
+    fragmentShader: /* glsl */`
+      precision highp float;
+      varying vec3 vWorld;
+      uniform float uTime;
+      uniform vec3  uBH;
+      uniform float uRs;
+      uniform vec3  uDiskN;
+      uniform vec3  uFlowAxis;
+      uniform float uDrift;
+      uniform float uBHOn;
+      uniform int   uSteps;
+
+      float hash13(vec3 p) {
+        p = fract(p * 0.1031);
+        p += dot(p, p.zyx + 31.32);
+        return fract((p.x + p.y) * p.z);
+      }
+      vec3 hash33(vec3 p) {
+        p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+        p += dot(p, p.yxz + 33.33);
+        return fract((p.xxy + p.yxx) * p.zyx);
+      }
+      float vnoise(vec3 p) {
+        vec3 i = floor(p), f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(
+          mix(mix(hash13(i), hash13(i + vec3(1,0,0)), f.x),
+              mix(hash13(i + vec3(0,1,0)), hash13(i + vec3(1,1,0)), f.x), f.y),
+          mix(mix(hash13(i + vec3(0,0,1)), hash13(i + vec3(1,0,1)), f.x),
+              mix(hash13(i + vec3(0,1,1)), hash13(i + vec3(1,1,1)), f.x), f.y), f.z);
+      }
+      float fbm(vec3 p) {
+        return vnoise(p) * 0.58 + vnoise(p * 2.7 + 5.1) * 0.28 + vnoise(p * 6.1 - 3.7) * 0.14;
+      }
+      vec3 rotAxis(vec3 v, vec3 ax, float a) {
+        float c = cos(a), s = sin(a);
+        return v * c + cross(ax, v) * s + ax * dot(ax, v) * (1.0 - c);
+      }
+
+      /* 程序化星空：两层星点 + 银河带星云 */
+      vec3 starfield(vec3 d) {
+        vec3 col = vec3(0.0);
+        for (int k = 0; k < 2; k++) {
+          float scale = k == 0 ? 90.0 : 44.0;
+          vec3 p = d * scale;
+          vec3 id = floor(p);
+          vec3 f = p - id;
+          float h = hash13(id);
+          if (h > (k == 0 ? 0.905 : 0.955)) {
+            vec3 sp = hash33(id + 17.7) * 0.7 + 0.15;
+            float m = smoothstep(0.17, 0.02, length(f - sp));
+            float br = pow(hash13(id + 5.2), 2.6) * (k == 0 ? 0.5 : 1.0);
+            float tw = 0.72 + 0.28 * sin(uTime * (1.5 + h * 4.0) + h * 41.0);
+            vec3 tint = mix(vec3(1.0), vec3(0.72, 0.84, 1.0), step(0.72, hash13(id + 3.3)));
+            tint = mix(tint, vec3(1.0, 0.86, 0.68), step(0.85, hash13(id + 9.7)));
+            col += tint * m * br * tw * (k == 0 ? 0.9 : 1.4);
+          }
+        }
+        vec3 bandN = normalize(vec3(0.3, 0.9, 0.32));
+        float bd = abs(dot(d, bandN));
+        float bandM = smoothstep(0.40, 0.04, bd);
+        float neb = fbm(d * 4.5 + 11.0);
+        float neb2 = fbm(d * 9.0 - 4.0);
+        vec3 nebCol = mix(vec3(0.10, 0.16, 0.30), vec3(0.30, 0.20, 0.15), neb2);
+        col += nebCol * bandM * (0.30 * neb + 0.12 * neb2);
+        col += vec3(0.045, 0.06, 0.09) * bandM * bandM;
+        return col;
+      }
+
+      /* 吸积盘着色：温度梯度 + 差速旋转花纹 + 多普勒束流 */
+      vec3 diskShade(vec3 hp, vec3 v) {
+        float rr = length(hp);
+        vec3 q = rotAxis(hp, uDiskN, uTime * 0.9 / pow(rr, 1.5));
+        float n = 0.55 + 0.45 * fbm(vec3(q.x * 1.35, q.z * 1.35, q.y * 5.0));
+        float t = smoothstep(7.0, 2.4, rr);
+        vec3 c = mix(vec3(1.0, 0.42, 0.12), vec3(1.0, 0.93, 0.80), pow(t, 1.4));
+        vec3 tang = normalize(cross(uDiskN, hp));
+        float beta = clamp(0.62 / sqrt(rr * 0.5), 0.0, 0.7);
+        float dop = dot(tang, -v);                        // 接近侧更亮更白
+        float boost = pow(clamp(1.0 + dop * beta * 1.4, 0.12, 2.4), 3.0);
+        c = mix(c, vec3(0.92, 0.96, 1.12), clamp(dop * 0.5 + 0.1, 0.0, 1.0) * t * 0.55);
+        float fade = smoothstep(2.35, 2.9, rr) * smoothstep(7.0, 5.6, rr);
+        return c * (n * boost * fade * 2.1 * pow(2.6 / rr, 1.6));
+      }
+
+      /* 简化 ACES，把超亮的盘压进显示范围 */
+      vec3 aces(vec3 x) {
+        return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+      }
+
+      void main() {
+        vec3 ro = cameraPosition;
+        vec3 rd = normalize(vWorld - ro);
+
+        // 星空整体绕巡航轴缓慢漂移 —— 凸显飞行器正在航行
+        vec3 sd = rotAxis(rd, uFlowAxis, uTime * uDrift);
+        vec3 col = starfield(sd);
+
+        if (uBHOn > 0.5) {
+          vec3 toBH = uBH - ro;
+          float dBH = length(toBH);
+          float ang = acos(clamp(dot(rd, toBH / dBH), -1.0, 1.0));
+          float infl = 11.0 * uRs / dBH;                  // 透镜影响角半径
+          if (ang < infl * 1.25) {
+            // 单位 = rs：从相机回溯光线，a = -1.5·h²·p / r⁵（史瓦西零测地线近似）
+            vec3 p = (ro - uBH) / uRs;
+            vec3 v = rd;
+            vec3 hv = cross(p, v);
+            float h2 = dot(hv, hv);
+            vec3 acc = vec3(0.0);
+            bool captured = false;
+            for (int i = 0; i < 160; i++) {
+              if (i >= uSteps) break;
+              float r2 = dot(p, p);
+              float r = sqrt(r2);
+              if (r < 1.02) { captured = true; break; }   // 落入视界：黑影
+              if (r > 64.0 && dot(p, v) > 0.0) break;     // 逃逸
+              float dt = clamp(r * 0.20, 0.06, 2.6);
+              float ph = dot(p, uDiskN);
+              float vh = dot(v, uDiskN);
+              if (ph * vh < 0.0) {                        // 本步穿过盘面
+                float tc = -ph / vh;
+                if (tc <= dt) {
+                  vec3 hp = p + v * tc;
+                  float rr = length(hp);
+                  if (rr > 2.3 && rr < 7.0) acc += diskShade(hp, v);
+                }
+              }
+              v += -1.5 * h2 * p / (r2 * r2 * r) * dt;
+              p += v * dt;
+            }
+            vec3 lensed = captured
+              ? acc
+              : acc + starfield(rotAxis(normalize(v), uFlowAxis, uTime * uDrift));
+            float w = smoothstep(infl * 1.25, infl * 0.55, ang);
+            col = mix(col, lensed, w);
+          }
+        }
+
+        col = aces(col * 1.15);
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `,
   });
-  const p = new THREE.Points(g, m);
-  p.frustumCulled = false;
-  scene.add(p);
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(900, 32, 24), mat);
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+  return { mesh, uni };
+})();
+
+/* ---------------- 星际尘埃：沿巡航方向掠过的拖尾线段，强化速度感 ---------------- */
+const dust = (() => {
+  const N = 260;
+  const flow = sky.uni.uFlow.value;
+  const pos = new Float32Array(N * 6);
+  const meta = [];
+  const lat = new THREE.Vector3();
+  for (let i = 0; i < N; i++) {
+    // 侧向偏移：避开半径 42 以内（不穿过永恒号），散布在 42~155 的圆环带上
+    const a = Math.random() * Math.PI * 2;
+    const rad = 42 + Math.pow(Math.random(), 0.7) * 113;
+    lat.set(Math.cos(a), 0, Math.sin(a)).multiplyScalar(rad);
+    lat.y += (Math.random() * 2 - 1) * 60;
+    meta.push({
+      lat: lat.clone(),
+      proj: (Math.random() * 2 - 1) * 175,
+      spd: 9 + Math.random() * 9,
+      len: 3 + Math.random() * 5,
+    });
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const seg = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
+    color: 0xa8c8e8, transparent: true, opacity: 0.30,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  }));
+  seg.frustumCulled = false;
+  scene.add(seg);
+
+  function spawn(i) {
+    const m = meta[i];
+    const a = Math.random() * Math.PI * 2;
+    const rad = 42 + Math.pow(Math.random(), 0.7) * 113;
+    m.lat.set(Math.cos(a), 0, Math.sin(a)).multiplyScalar(rad);
+    m.lat.y += (Math.random() * 2 - 1) * 60;
+    m.proj = -175;
+    m.spd = 9 + Math.random() * 9;
+    m.len = 3 + Math.random() * 5;
+  }
+
+  function update(dt) {
+    const f = sky.uni.uFlow.value;
+    for (let i = 0; i < N; i++) {
+      const m = meta[i];
+      m.proj += m.spd * dt;
+      if (m.proj > 180) spawn(i);
+      const x = f.x * m.proj + m.lat.x;
+      const y = f.y * m.proj + m.lat.y;
+      const z = f.z * m.proj + m.lat.z;
+      const t = m.len;
+      pos[i * 6]     = x;             pos[i * 6 + 1] = y;             pos[i * 6 + 2] = z;
+      pos[i * 6 + 3] = x + f.x * t;   pos[i * 6 + 4] = y + f.y * t;   pos[i * 6 + 5] = z + f.z * t;
+    }
+    geo.attributes.position.needsUpdate = true;
+  }
+  return { update };
 })();
 
 /* ---------------- 模型装载 ---------------- */
@@ -418,6 +625,13 @@ function bindUI() {
     btnSpin.classList.toggle('on', app.spinOn);
     updateSpinReadout();
   });
+  const btnBH = el('btn-bh');
+  btnBH.classList.toggle('on', CFG.bh);
+  btnBH.addEventListener('click', () => {
+    CFG.bh = !CFG.bh;
+    sky.uni.uBHOn.value = CFG.bh ? 1 : 0;
+    btnBH.classList.toggle('on', CFG.bh);
+  });
   el('btn-reset').addEventListener('click', () => { app.autoFrame = true; frameView(true); });
   el('btn-full').addEventListener('click', () => {
     if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
@@ -444,6 +658,7 @@ function bindUI() {
     if (e.code === 'Space') { e.preventDefault(); btnToggle.click(); }
     else if (e.key === 'a' || e.key === 'A') btnAuto.click();
     else if (e.key === 's' || e.key === 'S') btnSpin.click();
+    else if (e.key === 'g' || e.key === 'G') el('btn-bh').click();
     else if (e.key === 'r' || e.key === 'R') el('btn-reset').click();
     else if (e.key === 'f' || e.key === 'F') el('btn-full').click();
   });
@@ -515,6 +730,10 @@ const tmpQ = new THREE.Quaternion();
 const tmpQ2 = new THREE.Quaternion();
 
 function update(dt) {
+  // 天空：时间推进（星空漂移 / 盘面旋转 / 闪烁）+ 尘埃掠过
+  sky.uni.uTime.value += dt;
+  dust.update(dt);
+
   // 环自转（唯一的时间积分，登陆艇的姿态全部定义在环的随动系里）
   if (app.spinOn) app.spinPhase += dt * app.spinRate;
   ringPivot.rotation.y = app.spinPhase;
@@ -797,7 +1016,7 @@ async function boot() {
     // 调试/自动化钩子
     window.__ENDURANCE = {
       app, CFG, scene, camera, controls, ringPivot, ringBody, landerRig,
-      dockLocal, belly, THREE, ringModel, hatch, hubBottom,
+      dockLocal, belly, THREE, ringModel, sky, dust, hatch, hubBottom,
       toggle: separate => toggle(separate),
       frameView: hard => frameView(hard),
       separate: () => toggle(true),
