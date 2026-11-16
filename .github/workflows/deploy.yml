@@ -94,22 +94,24 @@ jobs:
           set -euo pipefail
           required=(
             index.html
-            mk85.html
             mk7.html
-            mk7-tiny.html
             ironman-hud.html
             jarvis-console.html
+            hulkbuster.html
+            interstellar.html
             css/hud.css
             css/mk7.css
-            css/showcase.css
-            assets/models/mk85.fbx
-            assets/models/armor2.glb
-            "model/tiny/irobny2_optimized.glb"
-            "model/tiny/hulk+buster2_optimized.glb"
+            css/interstellar.css
+            assets/models/detail/mk7.glb
+            assets/models/lite/mk7_lite.glb
+            assets/models/lite/hulk-buster2_lite.glb
+            assets/models/optimized/mk7_texture2048_webp.glb
+            assets/models/optimized/hulk-buster_texture2048_webp.glb
+            "assets/interstellar/optimized/interstellar__endurance_high_fidelity_optimized.glb"
+            "assets/interstellar/optimized/lander_exterior_model_from_interstellar_optimized.glb"
             lib/three/three.module.js
             lib/three/three.core.js
             lib/three/addons/loaders/GLTFLoader.js
-            lib/three/addons/loaders/FBXLoader.js
             lib/three/addons/libs/draco/draco_decoder.wasm
           )
           missing=0
