@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<!--
+  INTERSTELLAR · ENDURANCE / LANDER 对接演示
+  模型：assets/interstellar/optimized/（draco + webp，与 detail/ 同源仅压缩）
+  场景为独立管线（js/interstellar/main.js），不复用 showcase7 的边缘线渲染。
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#04070c">
+<title>ENDURANCE · DOCKING SEQUENCE</title>
+<meta name="description" content="Interstellar Endurance ring station and lander — docking and separation sequence in WebGL">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%239fd8ff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23eaf7ff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./css/interstellar.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./lib/three/three.module.js",
+    "three/addons/": "./lib/three/addons/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div class="vignette"></div>
+
+<header class="masthead">
+  <p class="eyebrow">RENDEZVOUS PROTOCOL · VEHICLE 01 / 02</p>
+  <h1>ENDUR<span>ANCE</span></h1>
+  <p class="sub">Ring station · lander docking &amp; separation sequence</p>
+</header>
+
+<nav class="links" aria-label="Other pages">
+  <a href="./index.html">HOME</a>
+  <a href="./mk7.html">MARK VII</a>
+  <a href="./hulkbuster.html">HULK BUSTER</a>
+</nav>
+
+<aside class="telemetry" aria-live="polite">
+  <p class="t-head"><span class="led"></span><b id="tl-status">DOCKED · CLAMPS LOCKED</b></p>
+  <div class="t-row"><span>RANGE</span><b id="tl-range">0.0 m</b></div>
+  <div class="t-row"><span>CLOSURE</span><b id="tl-closure">0.0 m/s</b></div>
+  <div class="t-row"><span>ALIGN</span><b id="tl-align">0.0°</b></div>
+  <div class="t-row"><span>CLAMPS</span><b id="tl-clamps" class="ok">LOCKED</b></div>
+  <div class="t-row"><span>RING SPIN</span><b id="tl-spin">0.050 rad/s</b></div>
+</aside>
+
+<nav class="controls" aria-label="Sequence controls">
+  <button id="btn-toggle" class="primary">SEPARATE</button>
+  <button id="btn-auto">AUTO CYCLE</button>
+  <button id="btn-spin" class="on">RING SPIN</button>
+  <i class="sep"></i>
+  <label class="slider" title="Ring rotation rate">
+    <span>SPIN</span>
+    <input id="rg-spin" type="range" min="0" max="100" value="42">
+  </label>
+  <label class="slider" title="Manoeuvre duration">
+    <span>RATE</span>
+    <input id="rg-rate" type="range" min="20" max="100" value="55">
+  </label>
+  <i class="sep"></i>
+  <button id="btn-reset">RESET VIEW</button>
+  <button id="btn-full">FULL</button>
+</nav>
+
+<p class="hint">Drag to orbit · scroll to zoom · double-click to re-frame · Space separate · A auto · S spin</p>
+
+<div class="loader" id="loader">
+  <div class="ring"><svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="34"></circle><circle id="prog" cx="40" cy="40" r="34"></circle></svg></div>
+  <p class="pct" id="pct">0%</p>
+  <p class="ld-text">Acquiring Endurance ring &amp; lander…</p>
+</div>
+
+<div class="error hidden" id="error">
+  <p class="err-title">LOAD FAILED</p>
+  <p class="err-msg" id="err-msg"></p>
+  <button id="btn-retry">RETRY</button>
+</div>
+
+<script type="module" src="./js/interstellar/main.js"
+        data-endurance="assets/interstellar/optimized/interstellar__endurance_high_fidelity_optimized.glb"
+        data-lander="assets/interstellar/optimized/lander_exterior_model_from_interstellar_optimized.glb"></script>
+</body>
+</html>

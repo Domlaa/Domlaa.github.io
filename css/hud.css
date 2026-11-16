@@ -407,10 +407,12 @@ body {
   .slider { display: none; }
   .dock { flex-wrap: wrap; justify-content: center; }
   .dock .sep { display: none; }
-  .panel.views a { font-size: 8.5px; letter-spacing: .03em; }
+  /* 入口变多后单行放不下：两列换行，标题才不会被省略号截断 */
+  .panel.views { flex-wrap: wrap; gap: 4px; }
+  .panel.views a { flex: 1 1 calc(50% - 2px); font-size: 9px; letter-spacing: .03em; }
 }
 @media (max-width: 400px) {
-  /* 极窄屏再去掉序号，保证三项标题都不被截断 */
+  /* 极窄屏再去掉序号，保证各项标题都不被截断 */
   .panel.views a i { display: none; }
   .panel.views { gap: 4px; padding: 4px 5px; }
 }

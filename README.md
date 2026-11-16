@@ -9,6 +9,7 @@
 | 全息拆解展示 | `/` | `assets/models/armor.glb`（1.2 万面） | 全息材质、10 模块拆解、HUD 指示线 |
 | MK7 线稿渲染 | `/mk7.html` | `assets/models/detail/mk7.glb`（14 万面） | 屏幕空间边缘检测、表面线条叠加、暗线/亮线双模式、截图导出 |
 | 反浩克线稿渲染 | `/hulkbuster.html` | `assets/models/optimized/hulk-buster_texture2048_webp.glb`（54 万面） | 同一套渲染管线，黑金涂装参数单独调优（低金属度 / 强环境反射 / 细线） |
+| 星际穿越对接 | `/interstellar.html` | `assets/interstellar/optimized/`（永恒号环站 + 登陆艇） | 独立场景管线：径向对接环、贝塞尔交会轨迹、对接/分离 + 自动循环、遥测读数 |
 
 ![tech](https://img.shields.io/badge/Three.js-r187-7de8ff) ![tech](https://img.shields.io/badge/WebGL-2.0-7de8ff) ![tech](https://img.shields.io/badge/build-none-brightgreen)
 
@@ -42,6 +43,7 @@
 index.html                 入口（importmap + HUD 结构）
 mk7.html                   MK VII 线稿渲染页
 hulkbuster.html            MARK XLIV 反浩克线稿渲染页（同管线，模型/取景/材质走 data-* 参数）
+interstellar.html          ENDURANCE 环站 / 登陆艇对接演示页（独立管线）
 css/mk7.css                线稿页共用样式
 css/hud.css                HUD 全部样式与响应式
 assets/models/             战甲模型（见下）
@@ -49,6 +51,7 @@ lib/three/                 Three.js r187 + 本地化 addons
 js/
 ├─ main.js                 编排：加载 → 显现 → 渲染循环
 ├─ showcase7/main.js       线稿页：三通道渲染 + 边缘检测线稿
+├─ interstellar/main.js    对接页：模型归一化 / 对接点求解 / 交会动画 / 遥测
 ├─ config/armor.config.js  模块定义、切分阈值、拆解偏移、场景参数
 ├─ core/SceneManager.js    渲染器 / 相机 / OrbitControls / 辉光 / 平台网格
 ├─ model/
@@ -75,6 +78,18 @@ js/
 | `optimized/` | 在二者之间取舍，仅压缩纹理贴图部分 | 压缩纹理 | 居中 | 兼顾画质与加载速度 |
 
 当前分布：`detail/mk7.glb`（原 armor2.glb，38 MB · 4K PBR 贴图）｜`lite/mk7_lite.glb`、`lite/hulk-buster2_lite.glb`（draco 压缩 · 无纹理）｜`optimized/hulk-buster_texture2048_webp.glb`（2048 webp 纹理版 · 21 MB，反浩克页用）。
+
+### assets/interstellar/（星际穿越素材）
+
+同一套 `detail / optimized` 分层，与战甲目录规则一致，但模型是「永恒号环站 + 登陆艇」两台飞行器：
+
+| 文件 | 大小 | 用途 |
+| --- | --- | --- |
+| `optimized/interstellar__endurance_high_fidelity_optimized.glb` | 1.3 MB | 环站（draco + 2048 webp，22 个网格 / 10 个材质） |
+| `optimized/lander_exterior_model_from_interstellar_optimized.glb` | 2.0 MB | 登陆艇（draco + webp） |
+| `detail/*.glb` | 21 MB / 13.8 MB | 原始未压缩版本，页面暂未引用 |
+
+环站原始包围盒 Y/Z 跨 116 单位（环直径约 64 m），登陆艇长 1.4 单位 —— **两者尺度差 80 倍**，页面加载时按 `ringRadius=30`、`landerLength=18` 归一化后再计算对接姿态。
 
 ## 四、本地运行
 
