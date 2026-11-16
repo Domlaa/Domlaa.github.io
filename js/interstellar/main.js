@@ -425,8 +425,9 @@ function bindUI() {
   });
 
   const rngSpin = el('rg-spin');
-  rngSpin.value = String(Math.round((CFG.spin / 0.4) * 100));
-  const applySpin = () => { app.spinRate = (Number(rngSpin.value) / 100) * 0.4; updateSpinReadout(); };
+  const SPIN_MAX = 0.8;    // 滑杆满格对应的自转角速度 rad/s
+  rngSpin.value = String(Math.round((CFG.spin / SPIN_MAX) * 100));
+  const applySpin = () => { app.spinRate = (Number(rngSpin.value) / 100) * SPIN_MAX; updateSpinReadout(); };
   rngSpin.addEventListener('input', applySpin);
   applySpin();
 
