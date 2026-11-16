@@ -1,10 +1,13 @@
 /**
- * INTERSTELLAR · ENDURANCE / LANDER —— 对接与分离演示
+ * INTERSTELLAR · ENDURANCE / LANDER —— 同心轴对接与分离演示
  *
  * 1 单位 = 1.0667 m（环半径 30 单位 ↔ 实际 32 m，整环直径 64 m）
  * 环平面 = YZ，自转轴 = X；lander 机头朝 -Z、尾朝 +Z（原始模型），
  * 归一化时绕 Y 转 180°，约定 rig 局部 +Z = 机头方向，原点 = 机头顶点。
- * 对接点由「沿径向向内打射线」实测环外表面得到，不写死坐标。
+ *
+ * 对接方式取自电影里 Cooper 的操作：不对环体边缘，而是沿环的**自转轴**
+ * 逼近中心轮毂的对接口（+X 端面），机头指向环心、机身随环一起自转，
+ * 靠「相对滚转归零」完成同心轴对接；分离也是纯轴向后退再侧移脱开。
  */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -20,20 +23,26 @@ const CFG = {
 
   ringRadius: 30,          // 归一化后的环外半径（单位）
   landerLength: 18,        // 归一化后的 lander 全长（单位）
-  dockAngle: 210,          // 对接点角度（度，YZ 平面自 +Z 向 +Y）；环上 12 个货舱每 30° 一个，取整倍数即舱口正中
-  dockRadius: 24.2,        // 对接面半径；实测该角度沿径向最外实体在 22.6，取略外侧贴着舱体
+
+  // 轴向对接口（环局部系，环心 = 0）：中心轮毂 +X 端面实测在 4.62，
+  // 端面中心还有一根伸到 6.42 的对接锥，机头落点取锥尖略外侧
+  portFaceX: 4.62,         // 对接锥底座（贴在轮毂端面上）
+  portX: 6.5,              // 机头顶点（= 对接锥口）
+
   spin: 0.05,              // 默认环自转 rad/s
   transit: 4.4,            // 默认机动时长 s
   metersPerUnit: 32 / 30,
 
-  park: { radial: 22, axial: -11, tangent: 13 },  // 分离后的停放点（相对对接点，环局部系）
+  // 分离后的泊位（相对对接口，环局部系）：先沿 +X 轴向退出，再侧移抬升
+  park: { axial: 24, lateral: 10, lift: 7 },
 };
 
-// 调试用：?ang=60&r=30.4 可临时覆盖对接角度 / 半径
+// 调试用：?px=6.8 覆盖机头落点，?ax=24 覆盖退出距离
 {
   const q = new URLSearchParams(location.search);
-  if (q.has('ang')) CFG.dockAngle = Number(q.get('ang'));
-  if (q.has('r')) CFG.dockRadius = Number(q.get('r'));
+  if (q.has('px')) CFG.portX = Number(q.get('px'));
+  if (q.has('facex')) CFG.portFaceX = Number(q.get('facex'));
+  if (q.has('ax')) CFG.park.axial = Number(q.get('ax'));
 }
 
 /* ---------------- 渲染器 / 场景 ---------------- */
@@ -59,7 +68,9 @@ const key = new THREE.DirectionalLight(0xfff1dd, 2.0); key.position.set(-1.1, 0.
 const fill = new THREE.DirectionalLight(0x86b9ff, 0.85); fill.position.set(1.2, -0.55, -0.75);
 const rim = new THREE.DirectionalLight(0xffffff, 1.25); rim.position.set(0.25, 1.0, -1.1);
 const amb = new THREE.HemisphereLight(0x9fc2e8, 0x0a0f16, 0.32);
-scene.add(key, fill, rim, amb);
+// 沿对接轴 +X 侧的补光：让停在轮毂前方的登陆艇不至于只剩剪影
+const shore = new THREE.DirectionalLight(0xffe9d2, 0.85); shore.position.set(1.7, 0.45, -0.35);
+scene.add(key, fill, rim, amb, shore);
 
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.05).texture;
@@ -142,7 +153,7 @@ function normalize(obj, targetMax, axisOfMax, anchor) {
   return new THREE.Box3().setFromObject(obj);
 }
 
-function dressMaterials(root, envInt) {
+function dressMaterials(root, envInt, metalCap) {
   root.traverse(o => {
     if (!o.isMesh) return;
     o.castShadow = o.receiveShadow = false;
@@ -150,7 +161,10 @@ function dressMaterials(root, envInt) {
     for (const m of mats) {
       if (!m) continue;
       m.envMapIntensity = envInt;
-      if (typeof m.metalness === 'number' && m.metalness > 0.9) m.metalness = 0.9;
+      if (typeof m.metalness === 'number') {
+        const cap = metalCap === undefined ? 0.9 : metalCap;
+        if (m.metalness > cap) m.metalness = cap;
+      }
       if (m.map) m.map.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
     }
   });
@@ -158,9 +172,9 @@ function dressMaterials(root, envInt) {
 
 /* ---------------- 对接点 / 泊位姿态 ---------------- */
 const dockLocal = {
-  pos: new THREE.Vector3(),
+  pos: new THREE.Vector3(),      // 机头落点（环局部系）
   quat: new THREE.Quaternion(),
-  radial: new THREE.Vector3(0, 0, 1),
+  axis: new THREE.Vector3(1, 0, 0),   // 环心 → 外侧的对接轴
 };
 
 /** 由 forward/up 构造「+Z = forward」的朝向 */
@@ -174,73 +188,87 @@ function quatFromForwardUp(forward, up) {
 }
 
 function computeDock(ringModel) {
-  const a = THREE.MathUtils.degToRad(CFG.dockAngle);
-  const radial = new THREE.Vector3(0, Math.sin(a), Math.cos(a)).normalize();
-  const ringPivotRot = ringPivot.rotation.x;
-  ringPivot.rotation.x = 0;
-  ringPivot.updateMatrixWorld(true);
-
-  // 沿径向向内打射线：环上的货舱朝外开口，射线会穿到舱内底板，
-  // 因此实测值只作为参考，真正落点用 dockRadius（默认取模块外缘）
-  const from = radial.clone().multiplyScalar(CFG.ringRadius * 1.9);
-  const ray = new THREE.Raycaster(from, radial.clone().negate(), 0, CFG.ringRadius * 3.2);
+  // 沿自转轴从 +X 外侧向内打一条射线，量出轮毂端面 / 对接锥的真实位置（仅作读数）
+  const from = new THREE.Vector3(CFG.ringRadius * 2, 0, 0);
+  const ray = new THREE.Raycaster(from, new THREE.Vector3(-1, 0, 0), 0, CFG.ringRadius * 4);
   const hits = ray.intersectObject(ringModel, true);
-  const measured = hits.length ? from.length() - hits[0].distance : CFG.ringRadius;
+  const measured = hits.length ? hits[0].point.x : CFG.portX;
 
-  ringPivot.rotation.x = ringPivotRot;
-  ringPivot.updateMatrixWorld(true);
-
-  const surfaceR = CFG.dockRadius > 0 ? CFG.dockRadius : CFG.ringRadius * 1.008;
-  dockLocal.radial.copy(radial);
-  dockLocal.pos.copy(radial).multiplyScalar(surfaceR + 0.55);
-  // 机头指向环心（-radial），机身「上方」朝环轴 +X，保证舱门正对镜头
-  dockLocal.quat.copy(quatFromForwardUp(radial.clone().negate(), new THREE.Vector3(1, 0, 0)));
-  return { surfaceR, measured };
+  dockLocal.axis.set(1, 0, 0);
+  dockLocal.pos.set(CFG.portX, 0, 0);
+  // 机头朝 -X（插向轮毂对接口），机身「上方」= 环局部 +Y
+  // → 对接后 lander 与环共用同一条自转轴，随环一起转
+  dockLocal.quat.copy(quatFromForwardUp(new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 1, 0)));
+  return { surfaceR: CFG.portX, measured, face: CFG.portFaceX };
 }
 
-/** 对接环：程序化生成，作为可视化锚点（源模型没有独立可用的舱口节点） */
+/**
+ * 轴向对接环：轮毂 +X 端面上的一段对接筒 + 两道发光环 + 4 个夹爪。
+ * 筒长正好等于「端面 → 机头落点」，把轮毂中心那根凸出的对接锥包在里面；
+ * collar 的 +Z = 沿 +X 向外（背离环心）。
+ */
 function buildCollar() {
-  const metal = new THREE.MeshStandardMaterial({ color: 0x101820, metalness: 0.92, roughness: 0.34 });
+  const metal = new THREE.MeshStandardMaterial({ color: 0xb8c3cd, metalness: 0.55, roughness: 0.45 });
   const ringMat = new THREE.MeshStandardMaterial({
-    color: 0x0b1218, metalness: 0.8, roughness: 0.3,
+    color: 0x0b1218, metalness: 0.7, roughness: 0.3,
     emissive: new THREE.Color(0x5fd0ff), emissiveIntensity: 0.9,
   });
   glowMats.push(ringMat);
 
-  const torus = new THREE.Mesh(new THREE.TorusGeometry(3.0, 0.2, 12, 60), ringMat);
-  const inner = new THREE.Mesh(new THREE.TorusGeometry(1.7, 0.12, 10, 48), ringMat);
-  const plate = new THREE.Mesh(new THREE.CylinderGeometry(3.15, 3.15, 0.24, 52), metal);
-  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.55, 24), metal);
+  const depth = Math.max(0.6, CFG.portX - CFG.portFaceX);
+  const tubeR = 2.3;
 
+  const plate = new THREE.Mesh(new THREE.CylinderGeometry(2.8, 2.62, 0.26, 48), metal);
   plate.rotation.x = Math.PI / 2;
-  hub.rotation.x = Math.PI / 2;
-  plate.position.z = -0.55;
-  hub.position.z = -0.1;
+  plate.position.z = -0.12;
 
-  // 伸向舱体的短轴：collar 的 +Z 指向环心，短轴沿 +Z 插进舱内做视觉收口
-  const stem = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 1.85, 4.6, 32, 1, true), metal);
-  stem.rotation.x = Math.PI / 2;
-  stem.position.z = 2.3;
-  collar.add(stem);
+  // 对接筒（开口圆柱），把轮毂端面凸出的对接锥罩住
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(tubeR, tubeR + 0.12, depth, 44, 1, true), metal);
+  tube.rotation.x = Math.PI / 2;
+  tube.position.z = depth / 2;
+  tube.material = metal.clone();
+  tube.material.side = THREE.DoubleSide;
 
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(2.56, 0.085, 10, 60), ringMat);
+  rim.position.z = 0.04;
+  const lip = new THREE.Mesh(new THREE.TorusGeometry(2.5, 0.09, 10, 60), ringMat);
+  lip.position.z = depth - 0.04;
+
+  // 外圈：套在轮毂端面的对接环，机头落座后仍能看到上下两段弧
+  const outer = new THREE.Mesh(new THREE.TorusGeometry(3.3, 0.13, 12, 72), ringMat);
+  outer.position.z = 0.1;
+  const struts = new THREE.Group();
+  for (let i = 0; i < 4; i++) {
+    const ang = (i * Math.PI) / 2;
+    const strut = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.16, 0.16), metal);
+    strut.position.set(Math.cos(ang) * 2.95, Math.sin(ang) * 2.95, 0.1);
+    strut.rotation.z = ang;
+    struts.add(strut);
+  }
+
+  // 4 个夹爪：贴着筒口，分离时沿轴向外推开
   const clamps = new THREE.Group();
   for (let i = 0; i < 4; i++) {
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.9, 0.5), metal);
     const ang = (i * Math.PI) / 2 + Math.PI / 4;
-    arm.position.set(Math.cos(ang) * 3.2, Math.sin(ang) * 3.2, 0.02);
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.72, 0.5), metal);
+    arm.position.set(Math.cos(ang) * 2.42, Math.sin(ang) * 2.42, depth - 0.3);
+    arm.userData.z0 = depth - 0.3;
     arm.rotation.z = ang - Math.PI / 2;
     clamps.add(arm);
   }
+
   const beacon = new THREE.Sprite(new THREE.SpriteMaterial({
     map: beaconTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.16,
   }));
-  beacon.scale.setScalar(11);
-  beacon.position.z = 0.3;
+  beacon.scale.setScalar(7);
+  beacon.position.z = depth + 0.2;
   collar.userData.beacon = beacon;
 
-  collar.add(torus, inner, plate, hub, clamps, beacon);
+  collar.add(plate, tube, rim, lip, outer, struts, clamps, beacon);
   collar.userData.clamps = clamps;
-  // torus 默认轴 = +Z，正好与 "朝向径向" 的约定一致
+  // 对接环固定在轮毂端面上：+Z = 沿 +X 朝外
+  collar.position.set(CFG.portFaceX, 0, 0);
+  collar.quaternion.copy(quatFromForwardUp(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0)));
   ringPivot.add(collar);
 }
 
@@ -263,35 +291,41 @@ const app = {
 const easeInOut = t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
 function nowWorldDock() {
+  const ringQ = ringPivot.getWorldQuaternion(new THREE.Quaternion()).normalize();
   const pos = ringPivot.localToWorld(dockLocal.pos.clone());
-  const quat = ringPivot.getWorldQuaternion(new THREE.Quaternion()).multiply(dockLocal.quat.clone());
-  const radial = dockLocal.radial.clone().applyQuaternion(ringPivot.getWorldQuaternion(new THREE.Quaternion()).normalize()).normalize();
-  return { pos, quat, radial };
+  const quat = ringQ.clone().multiply(dockLocal.quat.clone());
+  // 对接轴（环心 → 外侧）：环只绕 X 转，所以这条轴在世界系里是恒定的
+  const axis = dockLocal.axis.clone().applyQuaternion(ringQ).normalize();
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(ringQ).normalize();
+  return { pos, quat, axis, up };
 }
 
 function makeFreePose(dockW) {
-  const ringQ = ringPivot.getWorldQuaternion(new THREE.Quaternion()).normalize();
-  const axisW = new THREE.Vector3(1, 0, 0).applyQuaternion(ringQ).normalize();
-  const tangW = new THREE.Vector3().crossVectors(axisW, dockW.radial).normalize();
+  const axisW = dockW.axis;
+  const upW = dockW.up;
+  const tanW = new THREE.Vector3().crossVectors(axisW, upW).normalize();
+
+  // 泊位：沿对接轴退出 park.axial，再抬升 + 侧移
   const pos = dockW.pos.clone()
-    .addScaledVector(dockW.radial, CFG.park.radial)
     .addScaledVector(axisW, CFG.park.axial)
-    .addScaledVector(tangW, CFG.park.tangent);
-  // 分离后机头略微偏开环面，带一点侧倾
-  const delta = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.16, 0.42, -0.22, 'YXZ'));
+    .addScaledVector(upW, CFG.park.lift)
+    .addScaledVector(tanW, CFG.park.lateral);
+  // 退出后偏转：机头从「指向环心」转为侧向脱离
+  const delta = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.34, -0.46, 0.24, 'YXZ'));
   const quat = dockW.quat.clone().multiply(delta);
+  // 控制点几乎全压在轴线上 → 贝塞尔头段是纯轴向后退（同心轴分离）
   const ctrl = dockW.pos.clone()
-    .addScaledVector(dockW.radial, CFG.park.radial * 0.52)
-    .addScaledVector(tangW, CFG.park.tangent * 0.75)
-    .addScaledVector(axisW, CFG.park.axial * 0.3);
-  return { pos, quat, ctrl, tang: tangW, axis: axisW };
+    .addScaledVector(axisW, CFG.park.axial * 0.64)
+    .addScaledVector(tanW, CFG.park.lateral * 0.1)
+    .addScaledVector(upW, CFG.park.lift * 0.08);
+  return { pos, quat, ctrl, tang: tanW, axis: axisW, up: upW };
 }
 
 function startTween(to, done) {
-  // 每次分离都按「当下的」环姿态重算泊位，否则环转过之后旧泊位可能落在环体里
+  // 每次分离都按「当下的」环姿态重算泊位，否则环转过之后旧泊位会与环体错位
   if (to === 1) app.free = makeFreePose(nowWorldDock());
   app.tween = { from: app.prog, to, t: 0, dur: app.transit, done: done || null };
-  setStatus(to === 1 ? 'SEPARATING' : 'APPROACH · ALIGN');
+  setStatus(to === 1 ? 'AXIAL SEPARATION' : 'AXIAL APPROACH · ALIGN');
   if (to === 0) setClamps('OPEN', 'warn');
 }
 
@@ -394,7 +428,9 @@ function scheduleAuto() {
 }
 
 /* ---------------- 取景 ---------------- */
-const VIEW_DIR = new THREE.Vector3(1.0, 0.42, 0.78).normalize();
+// 沿对接轴偏 60° 左右看：环面仍是椭圆（读得出是环站），轴向动作也能看清
+const VIEW_DIR = new THREE.Vector3(0.45, 0.34, 1.0).normalize();
+const FRAME_TARGET = new THREE.Vector3(3, 0, 0);
 
 /** 竖屏时水平视角更窄，取横向/纵向两者中更远的那一个距离，保证不裁边 */
 function fitDistance(radius) {
@@ -407,11 +443,11 @@ function fitDistance(radius) {
 }
 
 function frameView(hard) {
-  const dist = fitDistance(48 + 16 * app.prog);
+  const dist = fitDistance(30 + 9 * app.prog);
   if (hard) {
-    controls.target.set(0, 0, 0);
-    camera.position.copy(VIEW_DIR).multiplyScalar(dist);
-    camera.lookAt(0, 0, 0);
+    controls.target.copy(FRAME_TARGET);
+    camera.position.copy(VIEW_DIR).multiplyScalar(dist).add(FRAME_TARGET);
+    camera.lookAt(FRAME_TARGET);
   }
 }
 
@@ -462,10 +498,15 @@ function update(dt) {
       .addScaledVector(c, 2 * it * s)
       .addScaledVector(b, s * s);
     landerRig.position.copy(tmpV);
-    tmpQ.copy(dockW.quat).slerp(free.quat, s);
-    // 交会时的轻微姿态摆动，s 靠近两端时归零
-    const wob = Math.sin(Math.PI * s) * 0.13 + Math.sin(Math.PI * 3 * s) * 0.035;
-    tmpQ.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0.35, 1, 0.18).normalize(), wob));
+    // 前 22% 保持对接姿态 → 先纯轴向后退，离开端口后才转向（退坞的典型动作）
+    const rotS = THREE.MathUtils.smoothstep(s, 0.22, 1.0);
+    tmpQ.copy(dockW.quat).slerp(free.quat, rotS);
+    // 沿对接轴的滚转匹配 + 一点偏航摆动；两端归零，避免破坏同心轴姿态
+    // premultiply = 绕世界轴旋转（multiply 会被当成物体局部轴，滚转就变成偏航了）
+    const roll = Math.sin(Math.PI * s) * 0.20;
+    const yaw = Math.sin(Math.PI * 3 * s) * 0.03;
+    tmpQ.premultiply(new THREE.Quaternion().setFromAxisAngle(free.axis, roll));
+    tmpQ.premultiply(new THREE.Quaternion().setFromAxisAngle(free.up, yaw));
     landerRig.quaternion.copy(tmpQ);
   } else {
     landerRig.position.copy(dockW.pos);
@@ -482,19 +523,28 @@ function update(dt) {
   app.closure += (Math.abs(closure) - app.closure) * Math.min(1, dt * 6);
 
   const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(landerRig.quaternion).normalize();
-  const alignDeg = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(fwd.dot(dockW.radial.clone().negate()), -1, 1)));
+  const dockFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(dockW.quat).normalize();
+  const alignDeg = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(fwd.dot(dockFwd), -1, 1)));
+
+  // 同心轴滚转同步：两边「上方」向量在垂直于对接轴的平面内的夹角
+  const upL = new THREE.Vector3(0, 1, 0).applyQuaternion(landerRig.quaternion);
+  upL.addScaledVector(dockW.axis, -upL.dot(dockW.axis)).normalize();
+  const rollDeg = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(upL.dot(dockW.up), -1, 1)));
 
   el('tl-range').textContent = rangeM.toFixed(rangeM < 100 ? 1 : 0) + ' m';
   el('tl-closure').textContent = app.closure.toFixed(1) + ' m/s';
   const alignEl = el('tl-align');
   alignEl.textContent = alignDeg.toFixed(1) + '°';
-  alignEl.className = alignDeg < 4 ? 'ok' : alignDeg < 24 ? '' : 'warn';
+  alignEl.className = alignDeg < 2 ? 'ok' : alignDeg < 10 ? '' : 'warn';
+  const rollEl = el('tl-roll');
+  if (rollEl) {
+    rollEl.textContent = app.prog < 0.02 ? 'SYNC' : rollDeg.toFixed(1) + '°';
+    rollEl.className = rollDeg < 3 ? 'ok' : rollDeg < 22 ? '' : 'warn';
+  }
 
-  if (app.tween && app.tween.to === 0) setStatus(app.tween.t < 0.6 ? 'APPROACH · ALIGN' : 'FINAL · CLAMPING');
+  if (app.tween && app.tween.to === 0) setStatus(app.tween.t < 0.55 ? 'AXIAL APPROACH · ALIGN' : 'FINAL · CLAMPING');
 
-  // 对接环姿态 / 夹爪 / 呼吸
-  collar.position.copy(dockLocal.pos);
-  collar.quaternion.copy(dockLocal.quat);
+  // 对接适配环姿态 / 夹爪 / 呼吸
   if (app.flash > 0) app.flash = Math.max(0, app.flash - dt * 1.4);
   const breathe = 0.72 + Math.sin(performance.now() * 0.0022) * 0.14;
   for (const m of glowMats) m.emissiveIntensity = breathe + app.flash * 3.2;
@@ -503,11 +553,11 @@ function update(dt) {
   const beacon = collar.userData.beacon;
   if (beacon) {
     beacon.material.opacity = 0.1 + Math.max(0, Math.sin(performance.now() * 0.0018)) * 0.1 + app.flash * 0.55;
-    beacon.scale.setScalar(11 + app.flash * 5);
+    beacon.scale.setScalar(7 + app.flash * 3.5);
   }
-  collar.userData.clamps.children.forEach((arm, i) => {
+  collar.userData.clamps.children.forEach(arm => {
     const open = THREE.MathUtils.clamp(app.prog * 1.6, 0, 1);
-    arm.position.z = 0.02 + open * 0.5 + (i % 2) * 0.0;
+    arm.position.z = arm.userData.z0 + open * 0.45;
   });
 
   // 引擎辉光
@@ -531,10 +581,15 @@ function update(dt) {
 
   // 自动取景（用户一旦手动操作相机就停止）
   if (app.autoFrame) {
-    const want = fitDistance(48 + 16 * app.prog);
+    const want = fitDistance(30 + 9 * app.prog);
     const cur = camera.position.distanceTo(controls.target);
     const next = THREE.MathUtils.damp(cur, want, 2.2, dt);
     camera.position.sub(controls.target).setLength(next).add(controls.target);
+    // 构图中心随分离进度向 +X 侧平移，避免对接时环被推到画面一侧
+    const tx = 3 + 10 * app.prog;
+    const dx = (tx - controls.target.x) * Math.min(1, dt * 1.6);
+    controls.target.x += dx;
+    camera.position.x += dx;
   }
   controls.update();
 }
@@ -619,14 +674,12 @@ async function boot() {
     const lModel = gLander.scene;
     lModel.rotation.y = Math.PI;
     normalize(lModel, CFG.landerLength, 'z', 'nose');
-    dressMaterials(lModel, 0.75);
+    dressMaterials(lModel, 1.35, 0.6);
     landerRig.add(lModel);
 
     buildCollar();
-    collar.position.copy(dockLocal.pos);
-    collar.quaternion.copy(dockLocal.quat);
 
-    // 初态：已对接
+    // 初态：已对接（机头压在轮毂对接口上）
     landerRig.position.copy(nowWorldDock().pos);
     landerRig.quaternion.copy(nowWorldDock().quat);
 
@@ -642,7 +695,8 @@ async function boot() {
     // 调试/自动化钩子
     window.__ENDURANCE = {
       app, CFG, scene, camera, controls, ringPivot, landerRig, collar,
-      dockLocal, surfaceR: dock.surfaceR, measuredR: dock.measured, THREE, ringModel,
+      dockLocal, portX: CFG.portX, portFaceX: CFG.portFaceX,
+      measuredR: dock.measured, THREE, ringModel,
       toggle: separate => toggle(separate),
       frameView: hard => frameView(hard),
       separate: () => toggle(true),
