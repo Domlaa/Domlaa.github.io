@@ -42,7 +42,7 @@ const CFG = {
   yawLag: 0.18,            // 泊位时的偏航滞后（弧度），对齐过程中收敛到 0
 
   bh: true,                // 卡冈图雅（黑洞 + 引力透镜吸积盘）开关
-  bhSteps: 96,             // 光线回溯步数（性能/画质折衷）
+  bhSteps: 200,            // 光线回溯步数（阴影圆润度/盘连续性的关键）
 };
 
 // 调试用：?yaw=&lat=&h=&spin=&docky=&hatchz=（手动给值则跳过对应的自动实测）
@@ -57,7 +57,7 @@ const manualDock = { docky: false, hatchz: false };
   if (q.has('docky')) { CFG.dockY = Number(q.get('docky')); manualDock.docky = true; }
   if (q.has('hatchz')) manualDock.hatchz = true;
   if (q.has('bh')) CFG.bh = q.get('bh') !== '0';
-  if (q.has('bhsteps')) CFG.bhSteps = Math.max(16, Math.min(160, Number(q.get('bhsteps')) || 96));
+  if (q.has('bhsteps')) CFG.bhSteps = Math.max(32, Math.min(320, Number(q.get('bhsteps')) || 200));
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -97,9 +97,9 @@ scene.environmentIntensity = 0.8;
 const sky = (() => {
   const uni = {
     uTime: { value: 0 },
-    uBH: { value: new THREE.Vector3(-470, -110, -470) },     // 黑洞中心（世界系）
+    uBH: { value: new THREE.Vector3(-470, -165, -470) },     // 黑洞中心（世界系）
     uRs: { value: 22 },                                      // 史瓦西半径（世界单位）
-    uDiskN: { value: new THREE.Vector3(0.55, 1.0, -0.30).normalize() }, // 吸积盘法线（近侧对着镜头 → 电影感）
+    uDiskN: { value: new THREE.Vector3(-0.24, 0.95, -0.28).normalize() }, // 吸积盘法线（相对默认视线近侧对，经典构图）
     uFlow: { value: new THREE.Vector3(0.9, 0, -0.44).normalize() },     // 巡航方向
     uFlowAxis: { value: new THREE.Vector3() },               // 星空漂移轴（⊥ uFlow）
     uDrift: { value: 0.0085 },                               // 星空漂移角速度 rad/s
@@ -193,15 +193,15 @@ const sky = (() => {
       vec3 diskShade(vec3 hp, vec3 v) {
         float rr = length(hp);
         vec3 q = rotAxis(hp, uDiskN, uTime * 0.9 / pow(rr, 1.5));
-        float n = 0.55 + 0.45 * fbm(vec3(q.x * 1.35, q.z * 1.35, q.y * 5.0));
-        float t = smoothstep(7.0, 2.4, rr);
+        float n = 0.55 + 0.45 * fbm(vec3(q.x * 1.3, q.y * 3.0, q.z * 1.3));
+        float t = smoothstep(5.8, 2.4, rr);
         vec3 c = mix(vec3(1.0, 0.42, 0.12), vec3(1.0, 0.93, 0.80), pow(t, 1.4));
         vec3 tang = normalize(cross(uDiskN, hp));
         float beta = clamp(0.62 / sqrt(rr * 0.5), 0.0, 0.7);
         float dop = dot(tang, -v);                        // 接近侧更亮更白
         float boost = pow(clamp(1.0 + dop * beta * 1.4, 0.12, 2.4), 3.0);
         c = mix(c, vec3(0.92, 0.96, 1.12), clamp(dop * 0.5 + 0.1, 0.0, 1.0) * t * 0.55);
-        float fade = smoothstep(2.35, 2.9, rr) * smoothstep(7.0, 5.6, rr);
+        float fade = smoothstep(2.4, 2.9, rr) * smoothstep(5.8, 4.8, rr);
         return c * (n * boost * fade * 2.1 * pow(2.6 / rr, 1.6));
       }
 
@@ -223,38 +223,58 @@ const sky = (() => {
           float dBH = length(toBH);
           float ang = acos(clamp(dot(rd, toBH / dBH), -1.0, 1.0));
           float infl = 11.0 * uRs / dBH;                  // 透镜影响角半径
-          if (ang < infl * 1.25) {
+          if (ang < infl * 1.35) {
             // 单位 = rs：从相机回溯光线，a = -1.5·h²·p / r⁵（史瓦西零测地线近似）
             vec3 p = (ro - uBH) / uRs;
             vec3 v = rd;
             vec3 hv = cross(p, v);
             float h2 = dot(hv, hv);
             vec3 acc = vec3(0.0);
+            float opa = 0.0;                              // 盘的不透明度累计（遮挡背景星）
             bool captured = false;
-            for (int i = 0; i < 160; i++) {
+            bool escaped = false;
+            for (int i = 0; i < 320; i++) {
               if (i >= uSteps) break;
               float r2 = dot(p, p);
               float r = sqrt(r2);
-              if (r < 1.02) { captured = true; break; }   // 落入视界：黑影
-              if (r > 64.0 && dot(p, v) > 0.0) break;     // 逃逸
-              float dt = clamp(r * 0.20, 0.06, 2.6);
+              if (r < 1.0) { captured = true; break; }    // 落入视界：黑影
+              if (r > 70.0 && dot(p, v) > 0.0) { escaped = true; break; }
+              // 自适应步长：越近越细，保证光子环附近积分收敛（阴影圆润的关键）
+              float dt = clamp(0.10 * r, 0.025, 1.3);
+              // 盘面穿越：把这一步拆成「到盘面 + 盘面之后」两段，弯曲误差更小
               float ph = dot(p, uDiskN);
               float vh = dot(v, uDiskN);
-              if (ph * vh < 0.0) {                        // 本步穿过盘面
+              if (ph * vh < 0.0) {
                 float tc = -ph / vh;
                 if (tc <= dt) {
                   vec3 hp = p + v * tc;
                   float rr = length(hp);
-                  if (rr > 2.3 && rr < 7.0) acc += diskShade(hp, v);
+                  if (rr > 2.3 && rr < 5.8) {
+                    vec3 dsk = diskShade(hp, v);
+                    acc += dsk * (1.0 - opa);
+                    opa = min(1.0, opa + length(dsk) * 0.55);
+                  }
+                  // 从盘面交点继续走完剩余步长
+                  float rem = dt - tc;
+                  v += -1.5 * h2 * p / (r2 * r2 * r) * tc;
+                  p += v * tc;
+                  v += -1.5 * h2 * p / (dot(p,p)*dot(p,p)*sqrt(dot(p,p))) * rem;
+                  p += v * rem;
+                  continue;
                 }
               }
               v += -1.5 * h2 * p / (r2 * r2 * r) * dt;
               p += v * dt;
             }
-            vec3 lensed = captured
-              ? acc
-              : acc + starfield(rotAxis(normalize(v), uFlowAxis, uTime * uDrift));
-            float w = smoothstep(infl * 1.25, infl * 0.55, ang);
+            vec3 lensed;
+            if (captured) {
+              lensed = acc;                               // 视界：黑影 + 前景盘光
+            } else {
+              vec3 bg = starfield(rotAxis(normalize(v), uFlowAxis, uTime * uDrift));
+              lensed = acc + bg * (1.0 - opa);            // 盘挡住身后的星
+              if (!escaped) lensed = mix(lensed, acc, 0.35); // 步数耗尽未逃逸：压暗避免假星
+            }
+            float w = smoothstep(infl * 1.35, infl * 0.6, ang);
             col = mix(col, lensed, w);
           }
         }
