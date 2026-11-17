@@ -43,6 +43,7 @@ const CFG = {
 
   bh: true,                // 卡冈图雅（黑洞 + 引力透镜吸积盘）开关
   bhSteps: 200,            // 光线回溯步数（阴影圆润度/盘连续性的关键）
+  diskH: 1.35,             // 吸积盘厚度系数（越大气壳越厚，盘带越粗、边缘越柔）
 };
 
 // 调试用：?yaw=&lat=&h=&spin=&docky=&hatchz=（手动给值则跳过对应的自动实测）
@@ -58,6 +59,7 @@ const manualDock = { docky: false, hatchz: false };
   if (q.has('hatchz')) manualDock.hatchz = true;
   if (q.has('bh')) CFG.bh = q.get('bh') !== '0';
   if (q.has('bhsteps')) CFG.bhSteps = Math.max(32, Math.min(320, Number(q.get('bhsteps')) || 200));
+  if (q.has('diskh')) CFG.diskH = Math.max(0.2, Math.min(4, Number(q.get('diskh')) || 1.35));
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -105,6 +107,8 @@ const sky = (() => {
     uDrift: { value: 0.0085 },                               // 星空漂移角速度 rad/s
     uBHOn: { value: CFG.bh ? 1 : 0 },
     uSteps: { value: CFG.bhSteps },
+    uDiskH: { value: CFG.diskH },                            // 盘厚度系数（薄盘 1.0 ≈ H/R 0.05）
+    uPx: { value: 0.001 },                                   // 一个像素对应多少弧度（sub-pixel 抗锯齿用）
   };
   uni.uFlowAxis.value.crossVectors(UP, uni.uFlow.value).normalize();
 
@@ -130,12 +134,19 @@ const sky = (() => {
       uniform vec3  uFlowAxis;
       uniform float uDrift;
       uniform float uBHOn;
+      uniform float uDiskH;
+      uniform float uPx;
       uniform int   uSteps;
 
       float hash13(vec3 p) {
         p = fract(p * 0.1031);
         p += dot(p, p.zyx + 31.32);
         return fract((p.x + p.y) * p.z);
+      }
+      float hash12(vec2 p) {
+        vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+        p3 += dot(p3, p3.yzx + 33.33);
+        return fract((p3.x + p3.y) * p3.z);
       }
       vec3 hash33(vec3 p) {
         p = fract(p * vec3(0.1031, 0.1030, 0.0973));
@@ -189,20 +200,125 @@ const sky = (() => {
         return col;
       }
 
-      /* 吸积盘着色：温度梯度 + 差速旋转花纹 + 多普勒束流 */
-      vec3 diskShade(vec3 hp, vec3 v) {
-        float rr = length(hp);
-        vec3 q = rotAxis(hp, uDiskN, uTime * 0.9 / pow(rr, 1.5));
-        float n = 0.55 + 0.45 * fbm(vec3(q.x * 1.3, q.y * 3.0, q.z * 1.3));
-        float t = smoothstep(5.8, 2.4, rr);
-        vec3 c = mix(vec3(1.0, 0.42, 0.12), vec3(1.0, 0.93, 0.80), pow(t, 1.4));
-        vec3 tang = normalize(cross(uDiskN, hp));
-        float beta = clamp(0.62 / sqrt(rr * 0.5), 0.0, 0.7);
-        float dop = dot(tang, -v);                        // 接近侧更亮更白
-        float boost = pow(clamp(1.0 + dop * beta * 1.4, 0.12, 2.4), 3.0);
-        c = mix(c, vec3(0.92, 0.96, 1.12), clamp(dop * 0.5 + 0.1, 0.0, 1.0) * t * 0.55);
-        float fade = smoothstep(2.4, 2.9, rr) * smoothstep(5.8, 4.8, rr);
-        return c * (n * boost * fade * 2.1 * pow(2.6 / rr, 1.6));
+      /* 吸积盘底色。角度用 cos/sin 取，天然绕轴闭合，不会有 atan 接缝；
+         开普勒差速把纹理拉成同心细丝，再叠相对论束流（迎面侧更亮更蓝） */
+      vec3 diskShade(vec3 hp, vec3 dir, float rr) {
+        vec3 ref = abs(uDiskN.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+        vec3 e1 = normalize(cross(uDiskN, ref));
+        vec3 e2 = cross(uDiskN, e1);
+        float a0 = atan(dot(hp, e2), dot(hp, e1));
+        float sh = a0 + uTime * 0.55 / (rr * sqrt(rr));
+        vec2 ring = vec2(cos(sh), sin(sh));
+
+        float n = 0.64 + 0.36 * fbm(vec3(ring * 2.4, rr * 3.6));
+        float n2 = fbm(vec3(ring * 5.6, rr * 1.6 + 11.0));
+        n *= 0.84 + 0.30 * n2;
+
+        float dop = dot(normalize(cross(uDiskN, hp)), -dir);
+        float beta = clamp(0.85 / sqrt(rr), 0.0, 0.72);
+        float beam = pow(clamp(1.0 + dop * beta * 1.7, 0.06, 2.6), 2.7);
+
+        float t = smoothstep(6.6, 2.0, rr);
+        vec3 c = mix(vec3(1.00, 0.26, 0.05), vec3(1.00, 0.66, 0.30), smoothstep(0.0, 0.52, t));
+        c = mix(c, vec3(1.00, 0.95, 0.87), smoothstep(0.40, 1.0, t));
+        c = mix(c, vec3(0.90, 0.95, 1.08), clamp(dop, 0.0, 1.0) * t * 0.42);
+
+        return c * (n * beam * pow(2.2 / rr, 1.5) * 1.95);
+      }
+
+      vec3 accel(vec3 p, float h2) {
+        float r2 = dot(p, p);
+        return -1.5 * h2 * p / (r2 * r2 * sqrt(r2));
+      }
+
+      /* 解析弱场偏折 α ≈ 2rs/b：整屏背景星空都用这一条曲线采样，
+         光线有没有走进追迹区都一致，追迹区边缘不会留下分界圆 */
+      vec3 skyDir(vec3 rdir) {
+        vec3 toBH = uBH - cameraPosition;
+        float dBH = length(toBH);
+        vec3 n = toBH / dBH;
+        float ca = clamp(dot(rdir, n), -1.0, 1.0);
+        float bImp = max(dBH * sqrt(max(0.0, 1.0 - ca * ca)) / uRs, 1.15);
+        vec3 ax = cross(rdir, n);
+        if (uBHOn < 0.5 || length(ax) < 1e-5) return rdir;
+        return normalize(rotAxis(rdir, normalize(ax), min(2.0 / bImp, 0.85)));
+      }
+
+      /* 一条光线的最终颜色：盘光累积 + 被透镜的背景星；落入视界就是黑影。
+         w 是追迹区边缘权重（0 = 完全不透镜，1 = 完全按测地线走） */
+      vec3 lensColor(vec3 rdir, float w, float jit) {
+        // 单位 = rs：从相机回溯光线，a = -1.5·h²·p / r⁵（史瓦西零测地线）
+        vec3 p = (cameraPosition - uBH) / uRs;
+        vec3 v = rdir;
+        vec3 hv = cross(p, v);
+        float h2 = dot(hv, hv);
+
+        vec3 acc = vec3(0.0);
+        float opa = 0.0;
+        bool captured = false;
+        bool escaped = false;
+
+        for (int i = 0; i < 320; i++) {
+          if (i >= uSteps) break;
+          float r2 = dot(p, p);
+          float r = sqrt(r2);
+          if (r < 1.0) { captured = true; break; }
+          if (r > 42.0 && dot(p, v) > 0.0) { escaped = true; break; }
+
+          // 到盘面的有符号距离 / 柱半径：盘是有厚度的气壳，不是一张纸
+          float ph = dot(p, uDiskN);
+          vec3 pr = p - uDiskN * ph;
+          float rr = length(pr);
+          float hz = uDiskH * (0.055 + 0.030 * rr);
+          float dt = clamp(0.085 * r, 0.032, 2.2);
+          // 盘内步长按「一步跨过几个 hz」定，而不是按绝对长度：
+          // 掠射光线（视线几乎贴着盘面）ph 变化慢，可以用大步；迎头穿盘必须小步。
+          // 两者都能采到平滑的垂直分布，又不会因掠射把步数耗光（那会画出一条圆弧缝）。
+          float tt0 = ph / hz;
+          float dn = exp(-1.8 * tt0 * tt0) * smoothstep(6.9, 5.0, rr);
+          if (abs(ph) < 2.2 * hz && rr < 6.95) {
+            float svh = abs(dot(v, uDiskN)) / max(length(v), 1e-4);
+            dt = min(dt, hz * mix(0.92, 0.36, dn) / max(svh, 0.035));
+          }
+          if (i == 0) dt *= 0.35 + 0.65 * jit;            // 首步抖动，把步进条带打散成颗粒
+
+          // RK2 中点法，弯曲轨迹更顺、误差更小
+          vec3 a1 = accel(p, h2);
+          vec3 pm = p + v * (dt * 0.5);
+          vec3 vm = v + a1 * (dt * 0.5);
+          vec3 a2 = accel(pm, h2);
+
+          float phm = dot(pm, uDiskN);
+          vec3 prm = pm - uDiskN * phm;
+          float rrm = length(prm);
+          if (rrm > 1.55 && rrm < 6.9) {
+            float hzm = uDiskH * (0.055 + 0.030 * rrm);
+            float tt = phm / hzm;
+            // 窄核 + 宽晕：盘缘不是一刀切，外面糊一层薄气，边缘才不像贴上去的板子
+            float dens = (exp(-1.8 * tt * tt) + 0.17 * exp(-0.22 * tt * tt))
+                       * smoothstep(1.55, 2.80, rrm)
+                       * smoothstep(6.9, 5.0, rrm);
+            if (dens > 0.004) {
+              float q = dens * dt / hzm * 0.46;
+              acc += diskShade(prm, normalize(vm), rrm) * q * (1.0 - opa);
+              opa = min(1.0, opa + q);
+            }
+          }
+          if (opa > 0.985) break;                         // 已经光学厚，再走也是浪费
+
+          v = v + a2 * dt;
+          p = p + vm * dt;
+        }
+
+        if (captured) return acc;
+        // 逃逸方向与解析偏折方向按 w 接续；步数耗尽（没逃出去）时任其落回解析值，
+        // 不会用「随机星点」把预算边界描成一条弧
+        vec3 dirEsc = escaped ? normalize(v) : skyDir(rdir);
+        vec3 dirBg = normalize(mix(skyDir(rdir), dirEsc, w));
+        vec3 bg = starfield(rotAxis(dirBg, uFlowAxis, uTime * uDrift));
+        // 追迹区里完全不画背景星：被引力透镜拉长的星点会变成一道道白痕，
+        // 而真实的卡冈图雅在这个曝光下背景也基本是纯黑
+        return acc + bg * (1.0 - opa) * (1.0 - w);
       }
 
       /* 简化 ACES，把超亮的盘压进显示范围 */
@@ -214,68 +330,38 @@ const sky = (() => {
         vec3 ro = cameraPosition;
         vec3 rd = normalize(vWorld - ro);
 
-        // 星空整体绕巡航轴缓慢漂移 —— 凸显飞行器正在航行
-        vec3 sd = rotAxis(rd, uFlowAxis, uTime * uDrift);
-        vec3 col = starfield(sd);
+        vec3 toBH = uBH - ro;
+        float dBH = length(toBH);
+        float ang = acos(clamp(dot(rd, toBH / dBH), -1.0, 1.0));
+
+        // 背景星：整屏统一用解析偏折方向，和追迹结果在边界处自然重合
+        vec3 col = starfield(rotAxis(skyDir(rd), uFlowAxis, uTime * uDrift));
 
         if (uBHOn > 0.5) {
-          vec3 toBH = uBH - ro;
-          float dBH = length(toBH);
-          float ang = acos(clamp(dot(rd, toBH / dBH), -1.0, 1.0));
-          float infl = 11.0 * uRs / dBH;                  // 透镜影响角半径
-          if (ang < infl * 1.35) {
-            // 单位 = rs：从相机回溯光线，a = -1.5·h²·p / r⁵（史瓦西零测地线近似）
-            vec3 p = (ro - uBH) / uRs;
-            vec3 v = rd;
-            vec3 hv = cross(p, v);
-            float h2 = dot(hv, hv);
-            vec3 acc = vec3(0.0);
-            float opa = 0.0;                              // 盘的不透明度累计（遮挡背景星）
-            bool captured = false;
-            bool escaped = false;
-            for (int i = 0; i < 320; i++) {
-              if (i >= uSteps) break;
-              float r2 = dot(p, p);
-              float r = sqrt(r2);
-              if (r < 1.0) { captured = true; break; }    // 落入视界：黑影
-              if (r > 70.0 && dot(p, v) > 0.0) { escaped = true; break; }
-              // 自适应步长：越近越细，保证光子环附近积分收敛（阴影圆润的关键）
-              float dt = clamp(0.10 * r, 0.025, 1.3);
-              // 盘面穿越：把这一步拆成「到盘面 + 盘面之后」两段，弯曲误差更小
-              float ph = dot(p, uDiskN);
-              float vh = dot(v, uDiskN);
-              if (ph * vh < 0.0) {
-                float tc = -ph / vh;
-                if (tc <= dt) {
-                  vec3 hp = p + v * tc;
-                  float rr = length(hp);
-                  if (rr > 2.3 && rr < 5.8) {
-                    vec3 dsk = diskShade(hp, v);
-                    acc += dsk * (1.0 - opa);
-                    opa = min(1.0, opa + length(dsk) * 0.55);
-                  }
-                  // 从盘面交点继续走完剩余步长
-                  float rem = dt - tc;
-                  v += -1.5 * h2 * p / (r2 * r2 * r) * tc;
-                  p += v * tc;
-                  v += -1.5 * h2 * p / (dot(p,p)*dot(p,p)*sqrt(dot(p,p))) * rem;
-                  p += v * rem;
-                  continue;
-                }
+          float lensA = 11.5 * uRs / dBH;
+          if (ang < lensA) {
+            // 权重在盘外一点才收到 0：盘的外缘不该被这个过渡带压暗（否则会浮出一圈亮环）
+            float w = smoothstep(lensA, lensA * 0.80, ang);
+            float jit = hash12(gl_FragCoord.xy);
+            vec3 c = lensColor(rd, w, jit);
+
+            /* 光子环只有一两个像素宽，单采样一定画成虚线 ——
+               只在阴影边缘这一圈做 4× 旋转超采样（多做一圈帧率就掉一半） */
+            float shadowA = 2.9 * uRs / dBH;
+            if (ang > shadowA * 0.80 && ang < shadowA * 1.40) {
+              vec3 upv = abs(rd.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+              vec3 tx = normalize(cross(upv, rd));
+              vec3 ty = cross(rd, tx);
+              vec3 sum = c;
+              for (int k = 0; k < 3; k++) {
+                float a = jit * 6.28318 + float(k) * 2.0944;
+                vec2 o = vec2(cos(a), sin(a)) * (0.60 * uPx);
+                sum += lensColor(normalize(rd + tx * o.x + ty * o.y), w, fract(jit + 0.41 * float(k)));
               }
-              v += -1.5 * h2 * p / (r2 * r2 * r) * dt;
-              p += v * dt;
+              c = sum * 0.25;
             }
-            vec3 lensed;
-            if (captured) {
-              lensed = acc;                               // 视界：黑影 + 前景盘光
-            } else {
-              vec3 bg = starfield(rotAxis(normalize(v), uFlowAxis, uTime * uDrift));
-              lensed = acc + bg * (1.0 - opa);            // 盘挡住身后的星
-              if (!escaped) lensed = mix(lensed, acc, 0.35); // 步数耗尽未逃逸：压暗避免假星
-            }
-            float w = smoothstep(infl * 1.35, infl * 0.6, ang);
-            col = mix(col, lensed, w);
+
+            col = mix(col, c, w);
           }
         }
 
@@ -963,6 +1049,8 @@ function resize() {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   renderer.setSize(w, h, false);
+  const dbh = renderer.getDrawingBufferSize(new THREE.Vector2()).y || h;
+  sky.uni.uPx.value = (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) / dbh;
 }
 addEventListener('resize', resize);
 resize();

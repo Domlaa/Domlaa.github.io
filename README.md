@@ -9,7 +9,7 @@
 | 全息拆解展示 | `/` | `assets/models/armor.glb`（1.2 万面） | 全息材质、10 模块拆解、HUD 指示线 |
 | MK7 线稿渲染 | `/mk7.html` | `assets/models/detail/mk7.glb`（14 万面） | 屏幕空间边缘检测、表面线条叠加、暗线/亮线双模式、截图导出 |
 | 反浩克线稿渲染 | `/hulkbuster.html` | `assets/models/optimized/hulk-buster_texture2048_webp.glb`（54 万面） | 同一套渲染管线，黑金涂装参数单独调优（低金属度 / 强环境反射 / 细线） |
-| 星际穿越对接 | `/interstellar.html` | `assets/interstellar/optimized/`（永恒号环站 + 登陆艇） | 独立场景管线：**环面平躺、两者同速绕竖直轴自转 → 圆心对齐 → 沿轴进近**，机腹对接面压上中央毂柱「下端口」（倒扣悬挂，程序化平台已移除）；对接/分离 + 自动循环、遥测读数 |
+| 星际穿越对接 | `/interstellar.html` | `assets/interstellar/optimized/`（永恒号环站 + 登陆艇） | 独立场景管线：背景是程序化**卡冈图雅**（体积吸积盘 + 史瓦西零测地线 RK2 积分 + 解析弱场偏折星图）；**环面平躺、两者同速绕竖直轴自转 → 圆心对齐 → 沿轴进近**，机腹对接面压上中央毂柱「下端口」（倒扣悬挂，程序化平台已移除）；对接/分离 + 自动循环、遥测读数 |
 
 ![tech](https://img.shields.io/badge/Three.js-r187-7de8ff) ![tech](https://img.shields.io/badge/WebGL-2.0-7de8ff) ![tech](https://img.shields.io/badge/build-none-brightgreen)
 
@@ -51,7 +51,7 @@ lib/three/                 Three.js r187 + 本地化 addons
 js/
 ├─ main.js                 编排：加载 → 显现 → 渲染循环
 ├─ showcase7/main.js       线稿页：三通道渲染 + 边缘检测线稿
-├─ interstellar/main.js    对接页：模型归一化 / 毂柱下端口对接（倒扣）/ 同轴自旋与进近 / 遥测
+├─ interstellar/main.js    对接页：模型归一化 / 毂柱下端口对接（倒扣）/ 同轴自旋与进近 / 遥测 / 卡冈图雅天空着色器
 ├─ config/armor.config.js  模块定义、切分阈值、拆解偏移、场景参数
 ├─ core/SceneManager.js    渲染器 / 相机 / OrbitControls / 辉光 / 平台网格
 ├─ model/
